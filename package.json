@@ -1,5 +1,5 @@
 {
-  "name": "@state-machinery/utils",
+  "name": "utils",
   "version": "0.1.0",
   "author": "brucou",
   "description": "Supporting utilities for the Kingly state machine library",
@@ -56,10 +56,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/brucou/utils.git"
+    "url": "git+https://github.com/state-machinery/utils.git"
   },
   "bugs": {
-    "url": "https://github.com/brucou/utils/issues"
+    "url": "https://github.com/state-machinery/utils/issues"
   },
-  "homepage": "https://github.com/brucou/utils#readme"
+  "homepage": "https://github.com/state-machinery/utils#readme"
 }
