@@ -1,0 +1,65 @@
+{
+  "name": "@state-machinery/utils",
+  "version": "0.1.0",
+  "author": "brucou",
+  "description": "Supporting utilities for the Kingly state machine library",
+  "scripts": {
+    "tests": "cd tests && mocha *specs*"
+  },
+  "devDependencies": {
+    "assert-diff": "^3.0.0",
+    "chai": "^4.2.0",
+    "mocha": "^7.1.1"
+  },
+  "dependencies": {
+    "commander": "^5.0.0",
+    "fast-xml-parser": "^3.16.0",
+    "fp-rosetree": "0.6.2",
+    "fs": "latest",
+    "funfix": "^7.0.1",
+    "kingly": "^0.28.0",
+    "nearley": "^2.19.3",
+    "prettier": "^2.0.4",
+    "pretty-format": "^26.0.0",
+    "ramda": "^0.27.0"
+  },
+  "prettier": {
+    "trailingComma": "es5",
+    "tabWidth": 2,
+    "printWidth": 120,
+    "semi": true,
+    "singleQuote": true
+  },
+  "sideEffects": false,
+  "files": [
+    "index.js",
+    "conversion.js",
+    "helpers.js",
+    "properties.js",
+    "templates.js",
+    "yedEdgeLabelGrammar.js"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "state-machine",
+    "state machine",
+    "finite state machine",
+    "state-transducer",
+    "state transducer",
+    "automata",
+    "automaton",
+    "automata"
+  ],
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brucou/utils.git"
+  },
+  "bugs": {
+    "url": "https://github.com/brucou/utils/issues"
+  },
+  "homepage": "https://github.com/brucou/utils#readme"
+}
