@@ -1,483 +1,1111 @@
-const {INIT_EVENT, INIT_STATE} = require('kingly');
+const {createStateMachine} = require('kingly');
 const assert = require('assert');
-const {formatResult} = require('../src/helpers');
+const prettyFormat = require('pretty-format');
+const {fakeConsole, cartesian} = require('../src/helpers');
 const {computeTransitionsAndStatesFromXmlString} = require('../src/yed2kingly');
+const graphs = require('./fixtures/');
+
+/**
+ * Test strategy
+ * We take a graphml file, convert it to the Kingly format,
+ * create a machine from it, and test that the machine behaves
+ * as expected from the graph specifications.
+ *
+ * Three key cases have to be dedicated some attention:
+ * - standard syntax
+ * - compound guards and actions
+ *   - e.g., [guard1, guard2] and / action1, action2
+ * - compound edges
+ * @param updates
+ * @returns {*}
+ */
+
+/////
+// Test setup
+
+// Use a simple merge to update extended state, that's enough for tests
+// but then updates must be an object, not an array
+const updateState = (extendedState, updates) => Object.assign({}, extendedState, updates);
+const traceTransition = str => ({outputs: [str], updates: {}});
 
 // cf. tests/graphs/test-yed-conversion.graphml
-const yedString = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:java="http://www.yworks.com/xml/yfiles-common/1.0/java" xmlns:sys="http://www.yworks.com/xml/yfiles-common/markup/primitives/2.0" xmlns:x="http://www.yworks.com/xml/yfiles-common/markup/2.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:y="http://www.yworks.com/xml/graphml" xmlns:yed="http://www.yworks.com/xml/yed/3" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://www.yworks.com/xml/schema/graphml/1.1/ygraphml.xsd">
-  <!--Created by yEd 3.19-->
-  <key attr.name="Description" attr.type="string" for="graph" id="d0"/>
-  <key for="port" id="d1" yfiles.type="portgraphics"/>
-  <key for="port" id="d2" yfiles.type="portgeometry"/>
-  <key for="port" id="d3" yfiles.type="portuserdata"/>
-  <key attr.name="url" attr.type="string" for="node" id="d4"/>
-  <key attr.name="description" attr.type="string" for="node" id="d5"/>
-  <key for="node" id="d6" yfiles.type="nodegraphics"/>
-  <key for="graphml" id="d7" yfiles.type="resources"/>
-  <key attr.name="url" attr.type="string" for="edge" id="d8"/>
-  <key attr.name="description" attr.type="string" for="edge" id="d9"/>
-  <key for="edge" id="d10" yfiles.type="edgegraphics"/>
-  <graph edgedefault="directed" id="G">
-    <data key="d0" xml:space="preserve"/>
-    <node id="n0">
-      <data key="d6">
-        <y:ShapeNode>
-          <y:Geometry height="30.0" width="30.0" x="216.25" y="146.5"/>
-          <y:Fill color="#FF6600" transparent="false"/>
-          <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-          <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="21.994140625" x="4.0029296875" xml:space="preserve" y="5.6494140625">init</y:NodeLabel>
-          <y:Shape type="ellipse"/>
-        </y:ShapeNode>
-      </data>
-    </node>
-    <node id="n1" yfiles.foldertype="group">
-      <data key="d4" xml:space="preserve"/>
-      <data key="d6">
-        <y:ProxyAutoBoundsNode>
-          <y:Realizers active="0">
-            <y:GroupNode>
-              <y:Geometry height="441.2529296875" width="533.5" x="0.0" y="272.0"/>
-              <y:Fill color="#F5F5F5" transparent="false"/>
-              <y:BorderStyle color="#000000" type="dashed" width="1.0"/>
-              <y:NodeLabel alignment="right" autoSizePolicy="node_width" backgroundColor="#EBEBEB" borderDistance="0.0" fontFamily="Dialog" fontSize="15" fontStyle="plain" hasLineColor="false" height="22.37646484375" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="t" textColor="#000000" verticalTextPosition="bottom" visible="true" width="533.5" x="0.0" xml:space="preserve" y="0.0">Group 1</y:NodeLabel>
-              <y:Shape type="roundrectangle"/>
-              <y:State closed="false" closedHeight="50.0" closedWidth="50.0" innerGraphDisplayEnabled="false"/>
-              <y:Insets bottom="15" bottomF="15.0" left="15" leftF="15.0" right="15" rightF="15.0" top="15" topF="15.0"/>
-              <y:BorderInsets bottom="0" bottomF="0.0" left="1" leftF="1.0" right="1" rightF="1.0" top="0" topF="0.0"/>
-            </y:GroupNode>
-            <y:GenericGroupNode configuration="PanelNode">
-              <y:Geometry height="50.0" width="50.0" x="163.40238095238095" y="451.701171875"/>
-              <y:Fill color="#68B0E3" transparent="false"/>
-              <y:BorderStyle hasColor="false" type="line" width="1.0"/>
-              <y:NodeLabel alignment="right" autoSizePolicy="node_width" borderDistance="0.0" fontFamily="Dialog" fontSize="16" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="23.6015625" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="t" textColor="#FFFFFF" verticalTextPosition="bottom" visible="true" width="62.6953125" x="-6.34765625" xml:space="preserve" y="0.0">Folder 1</y:NodeLabel>
-              <y:StyleProperties>
-                <y:Property class="java.awt.Color" name="headerBackground" value="#68b0e3"/>
-              </y:StyleProperties>
-              <y:State autoResize="true" closed="true" closedHeight="50.0" closedWidth="50.0"/>
-              <y:Insets bottom="15" bottomF="15.0" left="15" leftF="15.0" right="15" rightF="15.0" top="15" topF="15.0"/>
-              <y:BorderInsets bottom="0" bottomF="0.0" left="0" leftF="0.0" right="0" rightF="0.0" top="0" topF="0.0"/>
-            </y:GenericGroupNode>
-          </y:Realizers>
-        </y:ProxyAutoBoundsNode>
-      </data>
-      <graph edgedefault="directed" id="n1:">
-        <node id="n1::n0">
-          <data key="d6">
-            <y:ShapeNode>
-              <y:Geometry height="61.0" width="64.0" x="16.0" y="456.7529296875"/>
-              <y:Fill color="#FFCC00" transparent="false"/>
-              <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-              <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="33.40234375" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="53.9921875" x="5.00390625" xml:space="preserve" y="13.798828125">Showing
-mini UI</y:NodeLabel>
-              <y:Shape type="roundrectangle"/>
-            </y:ShapeNode>
-          </data>
-        </node>
-        <node id="n1::n1">
-          <data key="d6">
-            <y:ShapeNode>
-              <y:Geometry height="30.0" width="30.0" x="33.0" y="309.37646484375"/>
-              <y:Fill color="#FF6600" transparent="false"/>
-              <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-              <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="21.994140625" x="4.0029296875" xml:space="preserve" y="5.6494140625">init</y:NodeLabel>
-              <y:Shape type="ellipse"/>
-            </y:ShapeNode>
-          </data>
-        </node>
-        <node id="n1::n2">
-          <data key="d6">
-            <y:ShapeNode>
-              <y:Geometry height="30.0" width="30.0" x="140.0" y="637.7529296875"/>
-              <y:Fill color="#FF6600" transparent="false"/>
-              <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-              <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="17.3359375" x="6.33203125" xml:space="preserve" y="5.6494140625">H*</y:NodeLabel>
-              <y:Shape type="ellipse"/>
-            </y:ShapeNode>
-          </data>
-        </node>
-        <node id="n1::n3" yfiles.foldertype="group">
-          <data key="d4" xml:space="preserve"/>
-          <data key="d6">
-            <y:ProxyAutoBoundsNode>
-              <y:Realizers active="0">
-                <y:GroupNode>
-                  <y:Geometry height="263.37646484375" width="287.5" x="230.0" y="434.87646484375"/>
-                  <y:Fill color="#F5F5F5" transparent="false"/>
-                  <y:BorderStyle color="#000000" type="dashed" width="1.0"/>
-                  <y:NodeLabel alignment="right" autoSizePolicy="node_width" backgroundColor="#EBEBEB" borderDistance="0.0" fontFamily="Dialog" fontSize="15" fontStyle="plain" hasLineColor="false" height="22.37646484375" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="t" textColor="#000000" verticalTextPosition="bottom" visible="true" width="287.5" x="0.0" xml:space="preserve" y="0.0">big UI collapsed</y:NodeLabel>
-                  <y:Shape type="roundrectangle"/>
-                  <y:State closed="false" closedHeight="50.0" closedWidth="50.0" innerGraphDisplayEnabled="false"/>
-                  <y:Insets bottom="15" bottomF="15.0" left="15" leftF="15.0" right="15" rightF="15.0" top="15" topF="15.0"/>
-                  <y:BorderInsets bottom="0" bottomF="0.0" left="41" leftF="41.0" right="9" rightF="8.5" top="0" topF="0.0"/>
-                </y:GroupNode>
-                <y:GenericGroupNode configuration="PanelNode">
-                  <y:Geometry height="50.0" width="50.0" x="230.0" y="434.87646484375"/>
-                  <y:Fill color="#68B0E3" transparent="false"/>
-                  <y:BorderStyle hasColor="false" type="line" width="1.0"/>
-                  <y:NodeLabel alignment="right" autoSizePolicy="node_width" borderDistance="0.0" fontFamily="Dialog" fontSize="16" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="23.6015625" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="t" textColor="#FFFFFF" verticalTextPosition="bottom" visible="true" width="117.84375" x="-33.921875" xml:space="preserve" y="0.0">big UI collapsed</y:NodeLabel>
-                  <y:StyleProperties>
-                    <y:Property class="java.awt.Color" name="headerBackground" value="#68b0e3"/>
-                  </y:StyleProperties>
-                  <y:State autoResize="true" closed="true" closedHeight="50.0" closedWidth="50.0"/>
-                  <y:Insets bottom="15" bottomF="15.0" left="15" leftF="15.0" right="15" rightF="15.0" top="15" topF="15.0"/>
-                  <y:BorderInsets bottom="0" bottomF="0.0" left="0" leftF="0.0" right="0" rightF="0.0" top="0" topF="0.0"/>
-                </y:GenericGroupNode>
-              </y:Realizers>
-            </y:ProxyAutoBoundsNode>
-          </data>
-          <graph edgedefault="directed" id="n1::n3:">
-            <node id="n1::n3::n0">
-              <data key="d6">
-                <y:ShapeNode>
-                  <y:Geometry height="61.0" width="64.0" x="286.0" y="622.2529296875"/>
-                  <y:Fill color="#FFCC00" transparent="false"/>
-                  <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-                  <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="11.330078125" x="26.3349609375" xml:space="preserve" y="21.1494140625">If</y:NodeLabel>
-                  <y:Shape type="roundrectangle"/>
-                </y:ShapeNode>
-              </data>
-            </node>
-            <node id="n1::n3::n1">
-              <data key="d6">
-                <y:ShapeNode>
-                  <y:Geometry height="30.0" width="30.0" x="303.0" y="472.2529296875"/>
-                  <y:Fill color="#FF6600" transparent="false"/>
-                  <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-                  <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="21.994140625" x="4.0029296875" xml:space="preserve" y="5.6494140625">init</y:NodeLabel>
-                  <y:Shape type="ellipse"/>
-                </y:ShapeNode>
-              </data>
-            </node>
-            <node id="n1::n3::n2">
-              <data key="d6">
-                <y:ShapeNode>
-                  <y:Geometry height="61.0" width="64.0" x="430.0" y="622.2529296875"/>
-                  <y:Fill color="#FFCC00" transparent="false"/>
-                  <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-                  <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="56.01953125" x="3.990234375" xml:space="preserve" y="21.1494140625">then else</y:NodeLabel>
-                  <y:Shape type="roundrectangle"/>
-                </y:ShapeNode>
-              </data>
-            </node>
-          </graph>
-        </node>
-        <node id="n1::n4">
-          <data key="d6">
-            <y:ShapeNode>
-              <y:Geometry height="61.0" width="64.0" x="16.0" y="622.2529296875"/>
-              <y:Fill color="#FFCC00" transparent="false"/>
-              <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-              <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="46.673828125" x="8.6630859375" xml:space="preserve" y="21.1494140625">dummy</y:NodeLabel>
-              <y:Shape type="roundrectangle"/>
-            </y:ShapeNode>
-          </data>
-        </node>
-      </graph>
-    </node>
-    <node id="n2">
-      <data key="d6">
-        <y:ShapeNode>
-          <y:Geometry height="60.0" width="60.0" x="140.0" y="806.6552734375"/>
-          <y:Fill color="#FFCC00" transparent="false"/>
-          <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-          <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="custom" textColor="#000000" verticalTextPosition="bottom" visible="true" width="50.04296875" x="4.978515625" xml:space="preserve" y="20.6494140625">updating<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:ModelParameter><y:SmartNodeLabelModelParameter labelRatioX="0.0" labelRatioY="0.0" nodeRatioX="0.0" nodeRatioY="0.0" offsetX="0.0" offsetY="0.0" upX="0.0" upY="-1.0"/></y:ModelParameter></y:NodeLabel>
-          <y:Shape type="diamond"/>
-        </y:ShapeNode>
-      </data>
-    </node>
-    <node id="n3" yfiles.foldertype="group">
-      <data key="d4" xml:space="preserve"/>
-      <data key="d6">
-        <y:ProxyAutoBoundsNode>
-          <y:Realizers active="0">
-            <y:GroupNode>
-              <y:Geometry height="554.62939453125" width="177.0" x="593.5" y="-37.37646484375"/>
-              <y:Fill color="#F5F5F5" transparent="false"/>
-              <y:BorderStyle color="#000000" type="dashed" width="1.0"/>
-              <y:NodeLabel alignment="right" autoSizePolicy="node_width" backgroundColor="#EBEBEB" borderDistance="0.0" fontFamily="Dialog" fontSize="15" fontStyle="plain" hasLineColor="false" height="22.37646484375" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="t" textColor="#000000" verticalTextPosition="bottom" visible="true" width="177.0" x="0.0" xml:space="preserve" y="0.0">Group 3</y:NodeLabel>
-              <y:Shape type="roundrectangle"/>
-              <y:State closed="false" closedHeight="50.0" closedWidth="50.0" innerGraphDisplayEnabled="false"/>
-              <y:Insets bottom="15" bottomF="15.0" left="15" leftF="15.0" right="15" rightF="15.0" top="15" topF="15.0"/>
-              <y:BorderInsets bottom="0" bottomF="0.0" left="82" leftF="82.0" right="1" rightF="1.0" top="0" topF="0.0"/>
-            </y:GroupNode>
-            <y:GenericGroupNode configuration="PanelNode">
-              <y:Geometry height="50.0" width="50.0" x="-25.0" y="-25.0"/>
-              <y:Fill color="#68B0E3" transparent="false"/>
-              <y:BorderStyle hasColor="false" type="line" width="1.0"/>
-              <y:NodeLabel alignment="right" autoSizePolicy="node_width" borderDistance="0.0" fontFamily="Dialog" fontSize="16" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="23.6015625" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="t" textColor="#FFFFFF" verticalTextPosition="bottom" visible="true" width="61.8125" x="-5.90625" xml:space="preserve" y="0.0">Group 3</y:NodeLabel>
-              <y:StyleProperties>
-                <y:Property class="java.awt.Color" name="headerBackground" value="#68b0e3"/>
-              </y:StyleProperties>
-              <y:State autoResize="true" closed="true" closedHeight="50.0" closedWidth="50.0"/>
-              <y:Insets bottom="15" bottomF="15.0" left="15" leftF="15.0" right="15" rightF="15.0" top="15" topF="15.0"/>
-              <y:BorderInsets bottom="0" bottomF="0.0" left="0" leftF="0.0" right="0" rightF="0.0" top="0" topF="0.0"/>
-            </y:GenericGroupNode>
-          </y:Realizers>
-        </y:ProxyAutoBoundsNode>
-      </data>
-      <graph edgedefault="directed" id="n3:">
-        <node id="n3::n0">
-          <data key="d6">
-            <y:ShapeNode>
-              <y:Geometry height="61.0" width="64.0" x="690.5" y="131.0"/>
-              <y:Fill color="#FFCC00" transparent="false"/>
-              <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-              <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="33.40234375" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="50.01953125" x="6.990234375" xml:space="preserve" y="13.798828125">ran kan 
-kan</y:NodeLabel>
-              <y:Shape type="roundrectangle"/>
-            </y:ShapeNode>
-          </data>
-        </node>
-        <node id="n3::n1">
-          <data key="d6">
-            <y:ShapeNode>
-              <y:Geometry height="30.0" width="30.0" x="707.5" y="0.0"/>
-              <y:Fill color="#FF6600" transparent="false"/>
-              <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-              <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="21.994140625" x="4.0029296875" xml:space="preserve" y="5.6494140625">init</y:NodeLabel>
-              <y:Shape type="ellipse"/>
-            </y:ShapeNode>
-          </data>
-        </node>
-        <node id="n3::n2">
-          <data key="d6">
-            <y:ShapeNode>
-              <y:Geometry height="61.0" width="64.0" x="690.5" y="293.87646484375"/>
-              <y:Fill color="#FFCC00" transparent="false"/>
-              <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-              <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="33.40234375" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="46.01171875" x="8.994140625" xml:space="preserve" y="13.798828125">pa dam
-dam</y:NodeLabel>
-              <y:Shape type="roundrectangle"/>
-            </y:ShapeNode>
-          </data>
-        </node>
-        <node id="n3::n3">
-          <data key="d6">
-            <y:ShapeNode>
-              <y:Geometry height="30.0" width="30.0" x="707.5" y="472.2529296875"/>
-              <y:Fill color="#FF6600" transparent="false"/>
-              <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-              <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="bold" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="c" textColor="#000000" verticalTextPosition="bottom" visible="true" width="12.666015625" x="8.6669921875" xml:space="preserve" y="5.6494140625">H</y:NodeLabel>
-              <y:Shape type="ellipse"/>
-            </y:ShapeNode>
-          </data>
-        </node>
-      </graph>
-    </node>
-    <edge id="e0" source="n0" target="n1">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="0.0" sy="15.0" tx="-35.5" ty="-220.62646484375"/>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="33.40234375" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="right" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="52.0234375" x="-54.0234375" xml:space="preserve" y="10.125">
-/ activate<y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" placement="anywhere" side="right" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="e1" source="n1" target="n2">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="-81.75" sy="220.62646484375" tx="15.0" ty="-14.96875"/>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="33.40234375" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="right" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="107.39453125" x="-109.39453125" xml:space="preserve" y="10.125">trace sent
-/ update trace store<y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" placement="anywhere" side="right" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="n3::e0" source="n3::n1" target="n3::n0">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="0.0" sy="15.0" tx="0.0" ty="-30.5"/>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" hasText="false" height="4.0" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="anywhere" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="4.0" x="-6.0" y="10.125">
-            <y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" frozen="true" placement="anywhere" side="anywhere" sideReference="relative_to_edge_flow"/>
-          </y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="n3::e1" source="n3::n0" target="n3::n0">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="-32.0" sy="-15.25" tx="-16.0" ty="-30.5">
-            <y:Point x="650.0" y="146.25"/>
-            <y:Point x="650.0" y="90.5"/>
-            <y:Point x="706.5" y="90.5"/>
-          </y:Path>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="anywhere" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="60.009765625" x="-54.77783203125" xml:space="preserve" y="-20.701171875">stay [isOk]<y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" frozen="true" placement="anywhere" side="anywhere" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="n3::e2" source="n3::n0" target="n3::n2">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="0.0" sy="30.5" tx="0.0" ty="-30.5"/>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="left" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="33.40234375" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="anywhere" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="285.232421875" x="-65.921875" xml:space="preserve" y="2.7744140625">| stay [not(isOk, shown)] / deactivate, restore session
-| trace sent<y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" frozen="true" placement="anywhere" side="anywhere" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="n3::e3" source="n3::n2" target="n3::n3">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="0.0" sy="30.5" tx="0.0" ty="-15.0"/>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" hasText="false" height="4.0" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="anywhere" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="4.0" x="-6.0" y="10.125">
-            <y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" frozen="true" placement="anywhere" side="anywhere" sideReference="relative_to_edge_flow"/>
-          </y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="e2" source="n3::n0" target="n1::n3::n2">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="-32.0" sy="15.25" tx="0.0" ty="-30.5">
-            <y:Point x="609.5" y="176.75"/>
-            <y:Point x="609.5" y="232.0"/>
-            <y:Point x="462.0" y="232.0"/>
-          </y:Path>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="anywhere" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="7.333984375" x="-17.41943359375" xml:space="preserve" y="2.0">/<y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" frozen="true" placement="anywhere" side="anywhere" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="e3" source="n3::n2" target="n1::n3">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="-32.0" sy="0.0" tx="128.25" ty="-131.688232421875">
-            <y:Point x="609.5" y="324.37646484375"/>
-            <y:Point x="609.5" y="394.87646484375"/>
-            <y:Point x="502.0" y="394.87646484375"/>
-          </y:Path>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="anywhere" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="10.66796875" x="-20.75341796875" xml:space="preserve" y="-20.701171875">[]<y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" frozen="true" placement="anywhere" side="anywhere" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="e4" source="n2" target="n1::n2">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="-15.0" sy="-14.96875" tx="0.0" ty="15.0"/>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" hasText="false" height="4.0" horizontalTextPosition="center" iconTextGap="4" modelName="custom" preferredPlacement="anywhere" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="4.0" x="28.0" y="-89.94482421875">
-            <y:LabelModel>
-              <y:SmartEdgeLabelModel autoRotationEnabled="false" defaultAngle="0.0" defaultDistance="10.0"/>
-            </y:LabelModel>
-            <y:ModelParameter>
-              <y:SmartEdgeLabelModelParameter angle="0.0" distance="30.0" distanceToCenter="true" position="right" ratio="0.5" segment="0"/>
-            </y:ModelParameter>
-            <y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" frozen="true" placement="anywhere" side="anywhere" sideReference="relative_to_edge_flow"/>
-          </y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="n1::e0" source="n1::n0" target="n1::n3::n0">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="21.333333333333332" sy="30.5" tx="-32.0" ty="0.0">
-            <y:Point x="69.33333333333333" y="582.2529296875"/>
-            <y:Point x="246.0" y="582.2529296875"/>
-            <y:Point x="246.0" y="652.7529296875"/>
-          </y:Path>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="right" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="134.740234375" x="-136.74023691813153" xml:space="preserve" y="10.125">[shown] / expand clicked<y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" placement="anywhere" side="right" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="n1::e1" source="n1::n0" target="n1::n4">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="0.0" sy="30.5" tx="0.0" ty="-30.5"/>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="custom" preferredPlacement="anywhere" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="17.3359375" x="-19.3359375" xml:space="preserve" y="42.8994140625">[] /<y:LabelModel><y:SmartEdgeLabelModel autoRotationEnabled="false" defaultAngle="0.0" defaultDistance="10.0"/></y:LabelModel><y:ModelParameter><y:SmartEdgeLabelModelParameter angle="6.283185307179586" distance="2.0" distanceToCenter="false" position="right" ratio="0.5" segment="-1"/></y:ModelParameter><y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" frozen="true" placement="anywhere" side="anywhere" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="n1::e2" source="n1::n1" target="n1::n0">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="0.0" sy="15.0" tx="0.0" ty="-30.5"/>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="right" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="92.037109375" x="-94.037109375" xml:space="preserve" y="10.125">/ restore session<y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" placement="anywhere" side="right" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="n1::e3" source="n1::n3::n0" target="n1::n0">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="-21.333333333333332" sy="-30.5" tx="32.0" ty="0.0">
-            <y:Point x="296.6666666666667" y="542.2529296875"/>
-            <y:Point x="215.0" y="542.2529296875"/>
-            <y:Point x="215.0" y="487.2529296875"/>
-          </y:Path>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="right" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="91.3515625" x="2.0000101725260038" xml:space="preserve" y="-28.787109375">minimize clicked<y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" placement="anywhere" side="right" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="n1::n3::e0" source="n1::n3::n1" target="n1::n3::n0">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="0.0" sy="15.0" tx="0.0" ty="-30.5"/>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="anywhere" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="66.70703125" x="-68.70703125" xml:space="preserve" y="10.125">[only guard]<y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" frozen="true" placement="anywhere" side="anywhere" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-    <edge id="n1::n3::e1" source="n1::n3::n1" target="n1::n3::n2">
-      <data key="d10">
-        <y:PolyLineEdge>
-          <y:Path sx="15.0" sy="0.0" tx="-32.0" ty="0.0">
-            <y:Point x="390.0" y="487.2529296875"/>
-            <y:Point x="390.0" y="652.7529296875"/>
-          </y:Path>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
-          <y:EdgeLabel alignment="center" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" horizontalTextPosition="center" iconTextGap="4" modelName="free" modelPosition="anywhere" preferredPlacement="anywhere" ratio="0.5" textColor="#000000" verticalTextPosition="bottom" visible="true" width="110.740234375" x="59.0" xml:space="preserve" y="73.3994140625">[another only guard]<y:PreferredPlacementDescriptor angle="0.0" angleOffsetOnRightSide="0" angleReference="absolute" angleRotationOnRightSide="co" distance="-1.0" frozen="true" placement="anywhere" side="anywhere" sideReference="relative_to_edge_flow"/></y:EdgeLabel>
-          <y:BendStyle smoothed="false"/>
-        </y:PolyLineEdge>
-      </data>
-    </edge>
-  </graph>
-  <data key="d7">
-    <y:Resources/>
-  </data>
-</graphml>
+const {
+  test_yed_conversion_no_compound_actions_guards,
+  counter_inc_dec,
+  top_level_conditional_init,
+  deep_hierarchy_conditional_automatic_init_event_eventless,
+  deep_hierarchy_history_H_star,
+  hierarchy_conditional_init,
+  hierarchy_history_H,
+  hierarchy_history_H_star,
+  no_hierarchy_eventful_eventless_guards,
+  no_hierarchy_events_eventless,
+  top_level_conditional_init_with_hierarchy,
+  deep_hierarchy_history_H,
+} = require('./fixtures');
 
-`
+//////
+// Test execution
 
-describe('Conversion yed to kingly', function () {
-  const {getKinglyTransitions, stateYed2KinglyMap, states, events} = computeTransitionsAndStatesFromXmlString(yedString);
+describe('Conversion yed to kingly - testing conversion semantics', function () {
+  const {
+    top_level_conditional_init,
+    deep_hierarchy_conditional_automatic_init_event_eventless,
+    deep_hierarchy_history_H_star,
+    hierarchy_conditional_init,
+    hierarchy_history_H,
+    hierarchy_history_H_star,
+    no_hierarchy_eventful_eventless_guards,
+    no_hierarchy_events_eventless,
+    top_level_conditional_init_with_hierarchy,
+    deep_hierarchy_history_H,
+    test_yed_conversion,
+  } = graphs;
+  const settings = {debug: {fakeConsole}};
+  const event1 = {event1: void 0};
+  const event2 = {event2: void 0};
+  const event3 = {event3: void 0};
+  const unknownEvent = {event3: void 0};
+
+  describe('top_level_conditional_init', function () {
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(top_level_conditional_init);
+    const guards = {
+      // we test on extended state, so we test also the guard parameters
+      // are as expected
+      'not(isNumber)': (s, e, stg) => typeof s.n !== 'number',
+      isNumber: (s, e, stg) => typeof s.n === 'number',
+    };
+    const actionFactories = {
+      logOther: (s, e, stg) => ({outputs: [`logOther run on ${s.n}`], updates: {}}),
+      logNumber: (s, e, stg) => ({outputs: [`logNumber run on ${s.n}`], updates: {}}),
+    };
+
+    const fsmDef1 = {
+      updateState,
+      initialExtendedState: {n: 0},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const fsm1 = createStateMachine(fsmDef1, settings);
+    const fsmDef2 = {
+      updateState,
+      initialExtendedState: {n: ''},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const fsm2 = createStateMachine(fsmDef2, settings);
+
+    const outputs1 = [{[events[0] + 'X']: void 0}, {[events[0]]: void 0}, {[events[0]]: void 0}].map(fsm1);
+    const expected1 = [null, ['logNumber run on 0'], null];
+    const outputs2 = [{[events[0] + 'X']: void 0}, {[events[0]]: void 0}, {[events[0]]: void 0}].map(fsm2);
+    const expected2 = [null, ['logOther run on '], null];
+    it('runs the machine as per the graph', function () {
+      assert.deepEqual(errors, [], `graphml string is correctly parsed`);
+      assert.deepEqual(outputs1, expected1, `Branch machine initialized with number ok`);
+      assert.deepEqual(outputs2, expected2, `Branch machine initialized with string ok`);
+    });
+  });
+
+  describe('no-hierarchy-events-eventless', function () {
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(no_hierarchy_events_eventless);
+    const eventSpace = [event1, event2, unknownEvent];
+    const guards = {
+      shouldReturnToA: (s, e, stg) => s.shouldReturnToA,
+    };
+    const actionFactories = {
+      logAtoB: (s, e, stg) => traceTransition('A -> B'),
+      logAtoC: (s, e, stg) => traceTransition('A -> C'),
+      logBtoD: (s, e, stg) => traceTransition('B -> D'),
+      logCtoD: (s, e, stg) => traceTransition('C -> D'),
+      logDtoA: (s, e, stg) => traceTransition('D -> A'),
+    };
+
+    // Two machines to test the guard and achieve all-transition coverage
+    const fsmDef1 = {
+      updateState,
+      initialExtendedState: {shouldReturnToA: false},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const inputSpace = cartesian([0, 1, 2], [0, 1, 2], [0, 1, 2]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]], eventSpace[scenario[2]]];
+    });
+    const outputs1 = cases.map(scenario => {
+      const fsm1 = createStateMachine(fsmDef1, settings);
+      return scenario.map(fsm1);
+    });
+    const expected1 = [
+      // [event1, event1, event1]
+      [['A -> B'], null, null],
+      [['A -> B'], null, ['B -> D', null]],
+      [['A -> B'], null, null],
+      // [event1, event2, event1]
+      [['A -> B'], ['B -> D', null], null],
+      [['A -> B'], ['B -> D', null], null],
+      [['A -> B'], ['B -> D', null], null],
+      // [event1, event3, event1]
+      [['A -> B'], null, null],
+      [['A -> B'], null, ['B -> D', null]],
+      [['A -> B'], null, null],
+      // [event2, event1, event1]
+      [['A -> C'], ['C -> D', null], null],
+      [['A -> C'], ['C -> D', null], null],
+      [['A -> C'], ['C -> D', null], null],
+      // [event2, event2, event1]
+      [['A -> C'], null, ['C -> D', null]],
+      [['A -> C'], null, null],
+      [['A -> C'], null, null],
+      // [event2, event3, event1]
+      [['A -> C'], null, ['C -> D', null]],
+      [['A -> C'], null, null],
+      [['A -> C'], null, null],
+      // [event3, event1, event1]
+      [null, ['A -> B'], null],
+      [null, ['A -> B'], ['B -> D', null]],
+      [null, ['A -> B'], null],
+      // [event3, event2, event1]
+      [null, ['A -> C'], ['C -> D', null]],
+      [null, ['A -> C'], null],
+      [null, ['A -> C'], null],
+      // [event3, event3, event1]
+      [null, null, ['A -> B']],
+      [null, null, ['A -> C']],
+      [null, null, null],
+    ];
+
+    const fsmDef2 = {
+      updateState,
+      initialExtendedState: {shouldReturnToA: true},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const fsm2 = createStateMachine(fsmDef2, settings);
+    const outputs2 = cases.map(scenario => {
+      const fsm2 = createStateMachine(fsmDef2, settings);
+      return scenario.map(fsm2);
+    });
+    const expected2 = [
+      // [event1, event1, event1]
+      [['A -> B'], null, null],
+      [['A -> B'], null, ['B -> D', 'D -> A']],
+      [['A -> B'], null, null],
+      // [event1, event2, event1]
+      [['A -> B'], ['B -> D', 'D -> A'], ['A -> B']],
+      [['A -> B'], ['B -> D', 'D -> A'], ['A -> C']],
+      [['A -> B'], ['B -> D', 'D -> A'], null],
+      // [event1, event3, event1]
+      [['A -> B'], null, null],
+      [['A -> B'], null, ['B -> D', 'D -> A']],
+      [['A -> B'], null, null],
+      // [event2, event1, event1]
+      [['A -> C'], ['C -> D', 'D -> A'], ['A -> B']],
+      [['A -> C'], ['C -> D', 'D -> A'], ['A -> C']],
+      [['A -> C'], ['C -> D', 'D -> A'], null],
+      // [event2, event2, event1]
+      [['A -> C'], null, ['C -> D', 'D -> A']],
+      [['A -> C'], null, null],
+      [['A -> C'], null, null],
+      // [event2, event3, event1]
+      [['A -> C'], null, ['C -> D', 'D -> A']],
+      [['A -> C'], null, null],
+      [['A -> C'], null, null],
+      // [event3, event1, event1]
+      [null, ['A -> B'], null],
+      [null, ['A -> B'], ['B -> D', 'D -> A']],
+      [null, ['A -> B'], null],
+      // [event3, event2, event1]
+      [null, ['A -> C'], ['C -> D', 'D -> A']],
+      [null, ['A -> C'], null],
+      [null, ['A -> C'], null],
+      // [event3, event3, event1]
+      [null, null, ['A -> B']],
+      [null, null, ['A -> C']],
+      [null, null, null],
+    ];
+
+    it('runs the machine as per the graph', function () {
+      assert.deepEqual(errors, [], `graphml string is correctly parsed`);
+      assert.deepEqual(events, ['event1', 'event2'], `The list of events is correctly parsed`);
+      assert.deepEqual(
+        states,
+        {
+          Aღn1: '',
+          Bღn2: '',
+          Cღn3: '',
+          Dღn4: '',
+        },
+        `The hierarchy of states is correctly parsed`
+      );
+      assert.deepEqual(outputs1, expected1, `Branch machine initialized with number ok`);
+      assert.deepEqual(outputs2, expected2, `Branch machine initialized with string ok`);
+    });
+  });
+
+  describe('no_hierarchy_eventful_eventless_guards', function () {
+    // tests with:
+    // - condition1 fulfilled
+    // - condition2 fulfilled
+    // - condition3 fulfilled
+    // - both cond1 and cond2 fulfilled
+    // - both cond2 and cond3 fulfilled
+    // - none fulfilled
+    // [condx, condy]
+    // use power of 2 (bit position)
+    // Achtung!!!! For the tests, the order of guards in the guards array matters!!!
+    // I made it the transitions in same order as the condition so easier to reason about
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(no_hierarchy_eventful_eventless_guards);
+    const eventSpace = [{event: 1}, {event: 2}, {event: 4}, {event: 3}, {event: 6}, {event: 0}];
+    const guards = {
+      shouldReturnToA: (s, e, stg) => Boolean(s.shouldReturnToA),
+      // This time we test on event data, so we test also the guard parameters
+      // are as expected
+      condition1: (s, e, stg) => Boolean(e & 1),
+      condition2: (s, e, stg) => Boolean(e & 2),
+      condition3: (s, e, stg) => Boolean(e & 4),
+    };
+    const actionFactories = {
+      logAtoTemp1: (s, e, stg) => traceTransition('A -> Temp1'),
+      logTemp1toA: (s, e, stg) => traceTransition('Temp1 -> A'),
+      logAtoTemp2: (s, e, stg) => traceTransition('A -> Temp2'),
+      logTemp2toA: (s, e, stg) => traceTransition('Temp2 -> A'),
+      logAtoDone: (s, e, stg) => traceTransition('A -> Done'),
+    };
+
+    // console.log(`transitions: `, displayTransitionJSON(getKinglyTransitions({ actionFactories, guards }).transitions))
+
+    // Two machines to test the guard and achieve all-transition coverage
+    const fsmDef1 = {
+      updateState,
+      initialExtendedState: {shouldReturnToA: false},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const inputSpace = cartesian([0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 5]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]]];
+    });
+    const expected1 = [
+      // [cond1, cond1]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      // [cond1, cond2]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      // [cond1, cond3]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Done', null]],
+      // [cond1, cond12]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      // [cond1, cond23]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      // [cond1, !cond]
+      [['A -> Temp1', 'Temp1 -> A'], [null]],
+      // [cond2, x]
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Done', null]],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], [null]],
+      // [cond3, x]
+      [['A -> Done', null], null],
+      [['A -> Done', null], null],
+      [['A -> Done', null], null],
+      [['A -> Done', null], null],
+      [['A -> Done', null], null],
+      [['A -> Done', null], null],
+      // [cond12, x]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Done', null]],
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp1', 'Temp1 -> A'], [null]],
+      // [cond23, x]
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Done', null]],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], [null]],
+      // [!cond, x]
+      [[null], ['A -> Temp1', 'Temp1 -> A']],
+      [[null], ['A -> Temp2', 'Temp2 -> A']],
+      [[null], ['A -> Done', null]],
+      [[null], ['A -> Temp1', 'Temp1 -> A']],
+      [[null], ['A -> Temp2', 'Temp2 -> A']],
+      [[null], [null]],
+    ];
+
+    const fsmDef2 = {
+      updateState,
+      initialExtendedState: {shouldReturnToA: true},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const expected2 = [
+      // [cond1, cond1]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      // [cond1, cond2]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      // [cond1, cond3]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Done']],
+      // [cond1, cond12]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      // [cond1, cond23]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      // [cond1, !cond]
+      [['A -> Temp1', 'Temp1 -> A'], [null]],
+      // [cond2, x]
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Done']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], [null]],
+      // [cond3, x]
+      [['A -> Done'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Done'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Done'], ['A -> Done']],
+      [['A -> Done'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Done'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Done'], [null]],
+      // [cond12, x]
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Done']],
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp1', 'Temp1 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp1', 'Temp1 -> A'], [null]],
+      // [cond23, x]
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Done']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp1', 'Temp1 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], ['A -> Temp2', 'Temp2 -> A']],
+      [['A -> Temp2', 'Temp2 -> A'], [null]],
+      // [!cond, x]
+      [[null], ['A -> Temp1', 'Temp1 -> A']],
+      [[null], ['A -> Temp2', 'Temp2 -> A']],
+      [[null], ['A -> Done']],
+      [[null], ['A -> Temp1', 'Temp1 -> A']],
+      [[null], ['A -> Temp2', 'Temp2 -> A']],
+      [[null], [null]],
+    ];
+
+    it('runs the machine as per the graph', function () {
+      cases.forEach((scenario, index) => {
+        if (index > 35) return
+        const fsm1 = createStateMachine(fsmDef1, settings);
+        const outputs = scenario.map(fsm1);
+        assert.deepEqual(outputs, expected1[index], JSON.stringify(scenario).replace(/(\r\n\t|\n|\r\t)/gm, ""));
+        return outputs;
+      });
+    });
+
+    it('runs the machine as per the graph', function () {
+      cases.forEach((scenario, index) => {
+        if (index > 999995) return
+        const fsm2 = createStateMachine(fsmDef2, settings);
+        const outputs = scenario.map(fsm2);
+        assert.deepEqual(outputs, expected2[index], JSON.stringify(scenario).replace(/(\r\n\t|\n|\r\t)/gm, ""));
+        return outputs;
+      });
+    });
+
+    it('runs the machine as per the graph', function () {
+      assert.deepEqual(errors, [], `graphml string is correctly parsed`);
+      assert.deepEqual(events, ['event'], `The list of events is correctly parsed`);
+      assert.deepEqual(
+        states,
+        {
+          Aღn1: '',
+          Temp1ღn2: '',
+          Temp2ღn3: '',
+          Doneღn4: '',
+        },
+        `The hierarchy of states is correctly parsed`
+      );
+    });
+  });
+
+  describe('top_level_conditional_init_with_hierarchy', function () {
+    // should be exact same tests than top_level_conditional_init
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(top_level_conditional_init_with_hierarchy)
+    const guards = {
+      // we test on extended state, so we test also the guard parameters
+      // are as expected
+      'not(isNumber)': (s, e, stg) => typeof s.n !== 'number',
+      isNumber: (s, e, stg) => typeof s.n === 'number',
+    };
+    const actionFactories = {
+      logOther: (s, e, stg) => ({outputs: [`logOther run on ${s.n}`], updates: {}}),
+      logNumber: (s, e, stg) => ({outputs: [`logNumber run on ${s.n}`], updates: {}}),
+    };
+
+    const fsmDef1 = {
+      updateState,
+      initialExtendedState: {n: 0},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const fsm1 = createStateMachine(fsmDef1, {debug: {console: fakeConsole}});
+    const fsmDef2 = {
+      updateState,
+      initialExtendedState: {n: ''},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions
+    };
+    const fsm2 = createStateMachine(fsmDef2, {debug: {console: fakeConsole}});
+
+    const outputs1 = [{[events[0] + 'X']: void 0}, {[events[0]]: void 0}, {[events[0]]: void 0}].map(fsm1);
+    const expected1 = [null, ['logNumber run on 0'], null];
+    const outputs2 = [{[events[0] + 'X']: void 0}, {[events[0]]: void 0}, {[events[0]]: void 0}].map(fsm2);
+    const expected2 = [null, ['logOther run on '], null];
+
+    it('runs the machine as per the graph', function () {
+      assert.deepEqual(errors, [], `graphml string is correctly parsed`);
+      assert.deepEqual(events, ['continue'], `events correctly parsed`);
+      assert.deepEqual(
+        states,
+        {
+          'Group 1ღn1': {'Numberღn1::n0': '', 'Otherღn1::n2': '', 'Doneღn1::n3': ''}
+        },
+        `state hierarchy correctly parsed`
+      );
+      assert.deepEqual(outputs1, expected1, `Branch machine initialized with number ok`);
+      assert.deepEqual(outputs2, expected2, `Branch machine initialized with string ok`);
+    });
+  });
+
+  describe('hierarchy_conditional_init', function () {
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(hierarchy_conditional_init);
+    const settings1 = {n: 0};
+    const settings2 = {n: ''};
+    // We do the branching on `settings` so we tests also the signature of the guards
+    // in passing
+    const guards = {
+      'not(isNumber)': (s, e, stg) => typeof stg.n !== 'number',
+      isNumber: (s, e, stg) => typeof stg.n === 'number',
+    };
+    const actionFactories = {
+      logAtoB: (s, e, stg) => traceTransition('A -> B'),
+      logAtoC: (s, e, stg) => traceTransition('A -> C'),
+    };
+
+    // Two machines to test the guard and achieve all-transition coverage
+    const fsmDef1 = {
+      updateState,
+      initialExtendedState: void 0,
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const fsm1 = createStateMachine(fsmDef1, settings1);
+    const outputs1 = [unknownEvent, {event1: void 0}].map(fsm1);
+    const expected1 = [null, ['A -> B']];
+
+    const fsmDef2 = {
+      updateState,
+      initialExtendedState: void 0,
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions
+    };
+    const fsm2 = createStateMachine(fsmDef2, settings2);
+    const outputs2 = [unknownEvent, {event1: void 0}].map(fsm2);
+    const expected2 = [null, ['A -> C']];
+
+    it('runs the machine as per the graph', function () {
+      assert.deepEqual(errors, [], `graphml string is correctly parsed`);
+      assert.deepEqual(events, ['event1'], `The list of events is correctly parsed`);
+      assert.deepEqual(
+        states,
+        {
+          Aღn1: '',
+          'Group 1ღn2': {
+            'Bღn2::n0': '',
+            'Cღn2::n2': '',
+          },
+        },
+        `The hierarchy of states is correctly parsed`
+      );
+      assert.deepEqual(outputs1, expected1, `Branch machine initialized with number ok`);
+      assert.deepEqual(outputs2, expected2, `Branch machine initialized with string ok`);
+    });
+  });
+
+  describe('deep_hierarchy_conditional_automatic_init_event_eventless', function () {
+    // should be exact same tests than top_level_conditional_init
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(deep_hierarchy_conditional_automatic_init_event_eventless);
+    const guards = {
+      // we test on extended state, so we test also the guard parameters
+      // are as expected
+      'not(isNumber)': (s, e, stg) => typeof e.n !== 'number',
+      isNumber: (s, e, stg) => typeof e.n === 'number',
+      shouldReturnToA: (s, e, stg) => e.shouldReturnToA,
+    };
+    const actionFactories = {
+      logAtoGroup1: (s, e, stg) => traceTransition('A -> Group1'),
+      logGroup1toGroup2: (s, e, stg) => traceTransition('Group1 -> B'),
+      logGroup2toGroup3: (s, e, stg) => traceTransition('Group2 -> Group3'),
+      logGroup3BtoGroup4: (s, e, stg) => traceTransition('Group3 -> Group4'),
+      logGroup3toB: (s, e, stg) => traceTransition('Group3 -> B'),
+      logGroup3toC: (s, e, stg) => traceTransition('Group3 -> C'),
+      logAtoB: (s, e, stg) => traceTransition('A -> B'),
+      logAtoC: (s, e, stg) => traceTransition('A -> C'),
+      logBtoD: (s, e, stg) => traceTransition('B -> D'),
+      logDtoA: (s, e, stg) => traceTransition('D -> A'),
+      logCtoD: (s, e, stg) => traceTransition('C -> D'),
+    };
+    const fsmDef = {
+      updateState,
+      initialExtendedState: void 0,
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const outputs1 = [
+      {event1: {n: 0}},
+      {event1: void 0},
+      {event1: void 0},
+      {event2: {shouldReturnToA: false}},
+      {event2: {shouldReturnToA: false}},
+    ].map(createStateMachine(fsmDef, settings));
+    const outputs2 = [
+      {event1: {n: 0}},
+      {event1: void 0},
+      {event2: void 0},
+      {event1: {shouldReturnToA: false}},
+      {event1: {shouldReturnToA: false}},
+    ].map(createStateMachine(fsmDef, settings));
+    const outputs3 = [
+      {event1: {n: 0}},
+      {event1: void 0},
+      {event1: void 0},
+      {event2: {shouldReturnToA: true}},
+      {event2: {shouldReturnToA: false}},
+    ].map(createStateMachine(fsmDef, settings));
+    const outputs4 = [
+      {event1: {n: 0}},
+      {event1: void 0},
+      {event2: void 0},
+      {event1: {shouldReturnToA: true}},
+      {event1: {shouldReturnToA: false}},
+    ].map(createStateMachine(fsmDef, settings));
+    const outputs5 = [
+      {event1: {n: ''}},
+      {event1: void 0},
+      {event2: void 0},
+      {event1: {shouldReturnToA: true}},
+      {event1: {shouldReturnToA: false}},
+    ].map(createStateMachine(fsmDef, settings));
+
+    it('runs the machine as per the graph', function () {
+      assert.deepEqual(errors, [], `graphml string is correctly parsed`);
+      assert.deepEqual(events, ['event1', 'event2'], `events correctly parsed`);
+      assert.deepEqual(
+        states, {
+          "Aღn1": "",
+          "Group 1ღn2": {
+            "Bღn2::n0": "",
+            "Group 2ღn2::n2": {
+              "Group 3ღn2::n2::n1": {
+                "Bღn2::n2::n1::n0": "",
+                "Cღn2::n2::n1::n2": "",
+                "Group 4ღn2::n2::n1::n3": {
+                  "Aღn2::n2::n1::n3::n0": "",
+                  "Bღn2::n2::n1::n3::n1": "",
+                  "Cღn2::n2::n1::n3::n2": "",
+                  "Dღn2::n2::n1::n3::n3": ""
+
+                }
+              }
+            }
+          }
+        },
+        `state hierarchy correctly parsed`
+      );
+      // !!! mocha diff shows `null` as [null]!!!
+      assert.deepEqual(
+        outputs1,
+        [
+          ['A -> Group1', 'Group1 -> B', 'Group2 -> Group3', 'Group3 -> B'],
+          ['Group3 -> Group4'],
+          ['A -> B'],
+          ['B -> D', null],
+          null,
+        ],
+        `ok`
+      );
+      assert.deepEqual(
+        outputs2,
+        [
+          ['A -> Group1', 'Group1 -> B', 'Group2 -> Group3', 'Group3 -> B'],
+          ['Group3 -> Group4'],
+          ['A -> C'],
+          ['C -> D', null],
+          null,
+        ],
+        `ok`
+      );
+      assert.deepEqual(
+        outputs3,
+        [
+          ['A -> Group1', 'Group1 -> B', 'Group2 -> Group3', 'Group3 -> B'],
+          ['Group3 -> Group4'],
+          ['A -> B'],
+          ['B -> D', 'D -> A'],
+          ['A -> C'],
+        ],
+        `ok`
+      );
+      assert.deepEqual(
+        outputs4,
+        [
+          ['A -> Group1', 'Group1 -> B', 'Group2 -> Group3', 'Group3 -> B'],
+          ['Group3 -> Group4'],
+          ['A -> C'],
+          ['C -> D', 'D -> A'],
+          ['A -> B'],
+        ],
+        `ok`
+      );
+      assert.deepEqual(
+        outputs5,
+        [
+          ['A -> Group1', 'Group1 -> B', 'Group2 -> Group3', 'Group3 -> C'],
+          null, null, null, null
+        ],
+        `ok`
+      );
+    });
+  });
+
+  describe('hierarchy_history_H', function () {
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(hierarchy_history_H);
+    const eventSpace = [event1, event2, event3];
+    const guards = {};
+    const actionFactories = {
+      logGroup1toC: (s, e, stg) => traceTransition('Group1 -> C'),
+      logBtoC: (s, e, stg) => traceTransition('B -> C'),
+      logBtoD: (s, e, stg) => traceTransition('B -> D'),
+      logCtoD: (s, e, stg) => traceTransition('C -> D'),
+      logDtoGroup1H: (s, e, stg) => traceTransition('D -> Group1H'),
+    };
+
+    // Two machines to test the guard and achieve all-transition coverage
+    const fsmDef1 = {
+      updateState,
+      initialExtendedState: {},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const inputSpace = cartesian([0, 1, 2], [0, 1, 2], [0, 1, 2]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]], eventSpace[scenario[2]]];
+    });
+    const outputs1 = cases.map(scenario => {
+      const fsm1 = createStateMachine(fsmDef1, settings);
+      return scenario.map(fsm1);
+    });
+    const expected1 = [
+      // [event1, event1, event1]
+      [['B -> D'], null, null],
+      [['B -> D'], null, null],
+      [['B -> D'], null, ['D -> Group1H']],
+      // [event1, event2, event1]
+      [['B -> D'], null, null],
+      [['B -> D'], null, null],
+      [['B -> D'], null, ['D -> Group1H']],
+      // [event1, event3, event1]
+      [['B -> D'], ['D -> Group1H'], null],
+      [['B -> D'], ['D -> Group1H'], null],
+      [['B -> D'], ['D -> Group1H'], ['D -> Group1H']],
+      // [event2, event1, event1]
+      [['B -> C'], ['C -> D'], null],
+      [['B -> C'], ['C -> D'], null],
+      [['B -> C'], ['C -> D'], ['D -> Group1H']],
+      // [event2, event2, event1]
+      [['B -> C'], null, ['C -> D']],
+      [['B -> C'], null, null],
+      [['B -> C'], null, ['D -> Group1H']],
+      // [event2, event3, event1]
+      [['B -> C'], ['D -> Group1H'], ['C -> D']],
+      [['B -> C'], ['D -> Group1H'], null],
+      [['B -> C'], ['D -> Group1H'], ['D -> Group1H']],
+      // [event3, event1, event1]
+      [['D -> Group1H'], ['B -> D'], null],
+      [['D -> Group1H'], ['B -> D'], null],
+      [['D -> Group1H'], ['B -> D'], ['D -> Group1H']],
+      // [event3, event2, event1]
+      [['D -> Group1H'], ['B -> C'], ['C -> D']],
+      [['D -> Group1H'], ['B -> C'], null],
+      [['D -> Group1H'], ['B -> C'], ['D -> Group1H']],
+      // [event3, event3, event1]
+      [['D -> Group1H'], ['D -> Group1H'], ['B -> D']],
+      [['D -> Group1H'], ['D -> Group1H'], ['B -> C']],
+      [['D -> Group1H'], ['D -> Group1H'], ['D -> Group1H']],
+    ];
+
+    it('runs the machine as per the graph', function () {
+      assert.deepEqual(errors, [], `graphml string is correctly parsed`);
+      assert.deepEqual(events, ['event3', 'event1', 'event2'], `The list of events is correctly parsed`);
+      assert.deepEqual(
+        states,
+        {
+          Dღn1: '',
+          'Group 1ღn2': {
+            'Bღn2::n0': '',
+            'Cღn2::n1': '',
+            'Dღn2::n2': '',
+          },
+        },
+        `The hierarchy of states is correctly parsed`
+      );
+      assert.deepEqual(outputs1, expected1, `Branch machine initialized with number ok`);
+    });
+  });
+
+  describe('hierarchy_history_H_star', function () {
+    // Should be exactly the same as the hierarchy_history_H case
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(hierarchy_history_H_star);
+    const eventSpace = [event1, event2, event3];
+    const guards = {};
+    const actionFactories = {
+      logGroup1toC: (s, e, stg) => traceTransition('Group1 -> C'),
+      logBtoC: (s, e, stg) => traceTransition('B -> C'),
+      logBtoD: (s, e, stg) => traceTransition('B -> D'),
+      logCtoD: (s, e, stg) => traceTransition('C -> D'),
+      'logDtoGroup1H*': (s, e, stg) => traceTransition('D -> Group1H*'),
+    };
+
+    // Two machines to test the guard and achieve all-transition coverage
+    const fsmDef1 = {
+      updateState,
+      initialExtendedState: {},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const inputSpace = cartesian([0, 1, 2], [0, 1, 2], [0, 1, 2]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]], eventSpace[scenario[2]]];
+    });
+    const outputs1 = cases.map(scenario => {
+      const fsm1 = createStateMachine(fsmDef1, settings);
+      return scenario.map(fsm1);
+    });
+    const expected1 = [
+      // [event1, event1, event1]
+      [['B -> D'], null, null],
+      [['B -> D'], null, null],
+      [['B -> D'], null, ['D -> Group1H*']],
+      // [event1, event2, event1]
+      [['B -> D'], null, null],
+      [['B -> D'], null, null],
+      [['B -> D'], null, ['D -> Group1H*']],
+      // [event1, event3, event1]
+      [['B -> D'], ['D -> Group1H*'], null],
+      [['B -> D'], ['D -> Group1H*'], null],
+      [['B -> D'], ['D -> Group1H*'], ['D -> Group1H*']],
+      // [event2, event1, event1]
+      [['B -> C'], ['C -> D'], null],
+      [['B -> C'], ['C -> D'], null],
+      [['B -> C'], ['C -> D'], ['D -> Group1H*']],
+      // [event2, event2, event1]
+      [['B -> C'], null, ['C -> D']],
+      [['B -> C'], null, null],
+      [['B -> C'], null, ['D -> Group1H*']],
+      // [event2, event3, event1]
+      [['B -> C'], ['D -> Group1H*'], ['C -> D']],
+      [['B -> C'], ['D -> Group1H*'], null],
+      [['B -> C'], ['D -> Group1H*'], ['D -> Group1H*']],
+      // [event3, event1, event1]
+      [['D -> Group1H*'], ['B -> D'], null],
+      [['D -> Group1H*'], ['B -> D'], null],
+      [['D -> Group1H*'], ['B -> D'], ['D -> Group1H*']],
+      // [event3, event2, event1]
+      [['D -> Group1H*'], ['B -> C'], ['C -> D']],
+      [['D -> Group1H*'], ['B -> C'], null],
+      [['D -> Group1H*'], ['B -> C'], ['D -> Group1H*']],
+      // [event3, event3, event1]
+      [['D -> Group1H*'], ['D -> Group1H*'], ['B -> D']],
+      [['D -> Group1H*'], ['D -> Group1H*'], ['B -> C']],
+      [['D -> Group1H*'], ['D -> Group1H*'], ['D -> Group1H*']],
+    ];
+
+    it('runs the machine as per the graph', function () {
+      assert.deepEqual(errors, [], `graphml string is correctly parsed`);
+      assert.deepEqual(events, ['event3', 'event1', 'event2'], `The list of events is correctly parsed`);
+      assert.deepEqual(
+        states,
+        {
+          Dღn1: '',
+          'Group 1ღn2': {
+            'Bღn2::n0': '',
+            'Cღn2::n1': '',
+            'Dღn2::n2': '',
+          },
+        },
+        `The hierarchy of states is correctly parsed`
+      );
+      assert.deepEqual(outputs1, expected1, `Branch machine initialized with number ok`);
+    });
+  });
+
+  describe('deep_hierarchy_history_H_star', function () {
+    // Should be exactly the same as the hierarchy_history_H case
+    const {getKinglyTransitions, states, events, errors} = computeTransitionsAndStatesFromXmlString(
+      deep_hierarchy_history_H_star
+    );
+    const eventSpace = [event1, event2, event3];
+    const guards = {};
+    const actionFactories = {
+      logGroup1toC: (s, e, stg) => traceTransition('Group1 -> C'),
+      logGroup1toD: (s, e, stg) => traceTransition('Group1 -> D'),
+      logGroup1toE: (s, e, stg) => traceTransition('Group1 -> E'),
+      logBtoC: (s, e, stg) => traceTransition('B -> C'),
+      logBtoD: (s, e, stg) => traceTransition('B -> D'),
+      logCtoD: (s, e, stg) => traceTransition('C -> D'),
+      logDtoD: (s, e, stg) => traceTransition('D -> D'),
+      'logGroup1toH*': (s, e, stg) => traceTransition('Group1 -> Group1H*'),
+    };
+
+    // Two machines to test the guard and achieve all-transition coverage
+    const fsmDef1 = {
+      updateState,
+      initialExtendedState: {},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions
+    };
+    const inputSpace = cartesian([0, 1, 2], [0, 1, 2], [0, 1, 2]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]], eventSpace[scenario[2]]];
+    });
+    const outputs1 = cases.map(scenario => {
+      const fsm1 = createStateMachine(fsmDef1, settings);
+      return scenario.map(fsm1);
+    });
+    const expected1 = [
+      // [event1, event1, event1]
+      [['B -> D'], ['D -> D'], null],
+      [['B -> D'], ['D -> D'], null],
+      [['B -> D'], ['D -> D'], ['Group1 -> Group1H*']],
+      // [event1, event2, event1]
+      [['B -> D'], null, ['D -> D']],
+      [['B -> D'], null, null],
+      [['B -> D'], null, ['Group1 -> Group1H*']],
+      // [event1, event3, event1]
+      [['B -> D'], ['Group1 -> Group1H*'], ['D -> D']],
+      [['B -> D'], ['Group1 -> Group1H*'], null],
+      [['B -> D'], ['Group1 -> Group1H*'], ['Group1 -> Group1H*']],
+      // [event2, event1, event1]
+      [['B -> C', 'C -> D'], null, null],
+      [['B -> C', 'C -> D'], null, null],
+      [['B -> C', 'C -> D'], null, ['Group1 -> Group1H*']],
+      // [event2, event2, event1]
+      [['B -> C', 'C -> D'], null, null],
+      [['B -> C', 'C -> D'], null, null],
+      [['B -> C', 'C -> D'], null, ['Group1 -> Group1H*']],
+      // [event2, event3, event1]
+      [['B -> C', 'C -> D'], ['Group1 -> Group1H*'], null],
+      [['B -> C', 'C -> D'], ['Group1 -> Group1H*'], null],
+      [['B -> C', 'C -> D'], ['Group1 -> Group1H*'], ['Group1 -> Group1H*']],
+      // [event3, event1, event1]
+      [['Group1 -> Group1H*'], ['B -> D'], ['D -> D']],
+      [['Group1 -> Group1H*'], ['B -> D'], null],
+      [['Group1 -> Group1H*'], ['B -> D'], ['Group1 -> Group1H*']],
+      // [event3, event2, event1]
+      [['Group1 -> Group1H*'], ['B -> C', 'C -> D'], null],
+      [['Group1 -> Group1H*'], ['B -> C', 'C -> D'], null],
+      [['Group1 -> Group1H*'], ['B -> C', 'C -> D'], ['Group1 -> Group1H*']],
+      // [event3, event3, event1]
+      [['Group1 -> Group1H*'], ['Group1 -> Group1H*'], ['B -> D']],
+      [['Group1 -> Group1H*'], ['Group1 -> Group1H*'], ['B -> C', 'C -> D']],
+      [['Group1 -> Group1H*'], ['Group1 -> Group1H*'], ['Group1 -> Group1H*']],
+    ];
+
+    it('runs the machine as per the graph', function () {
+      assert.deepEqual(errors, [], `graphml string is correctly parsed`);
+      assert.deepEqual(events, ['event3', 'event2', 'event1'], `The list of events is correctly parsed`);
+      assert.deepEqual(
+        states,
+        {
+          'Eღn1': '',
+          'Group 1ღn2': {
+            'Bღn2::n0': '',
+            'Cღn2::n1': '',
+            'Group 1ღn2::n2': {
+              'Dღn2::n2::n0': '',
+              'Dღn2::n2::n2': '',
+            },
+          },
+        },
+        `The hierarchy of states is correctly parsed`
+      );
+      assert.deepEqual(outputs1, expected1, `Branch machine initialized with number ok`);
+    });
+  });
+
+  describe('deep_hierarchy_history_H', function () {
+    // Should be exactly the same as the hierarchy_history_H case
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(deep_hierarchy_history_H);
+    const eventSpace = [event1, event2, event3];
+    const guards = {};
+    const actionFactories = {
+      logGroup1toC: (s, e, stg) => traceTransition('Group1 -> C'),
+      logGroup1toD: (s, e, stg) => traceTransition('Group1 -> D'),
+      logGroup1toE: (s, e, stg) => traceTransition('Group1 -> E'),
+      logBtoC: (s, e, stg) => traceTransition('B -> C'),
+      logBtoD: (s, e, stg) => traceTransition('B -> D'),
+      logCtoD: (s, e, stg) => traceTransition('C -> D'),
+      logDtoD: (s, e, stg) => traceTransition('D -> D'),
+      logGroup1toH: (s, e, stg) => traceTransition('Group1 -> Group1H'),
+    };
+
+    // Two machines to test the guard and achieve all-transition coverage
+    const fsmDef1 = {
+      updateState,
+      initialExtendedState: {},
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+    const inputSpace = cartesian([0, 1, 2], [0, 1, 2], [0, 1, 2]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]], eventSpace[scenario[2]]];
+    });
+    const outputs1 = cases.map(scenario => {
+      const fsm1 = createStateMachine(fsmDef1, settings);
+      return scenario.map(fsm1);
+    });
+    const expected1 = [
+      // [event1, event1, event1]
+      [['B -> D'], ['D -> D'], null],
+      [['B -> D'], ['D -> D'], null],
+      [['B -> D'], ['D -> D'], ['Group1 -> Group1H', 'Group1 -> D']],
+      // [event1, event2, event1]
+      [['B -> D'], null, ['D -> D']],
+      [['B -> D'], null, null],
+      [['B -> D'], null, ['Group1 -> Group1H', 'Group1 -> D']],
+      // [event1, event3, event1]
+      [['B -> D'], ['Group1 -> Group1H', 'Group1 -> D'], null],
+      [['B -> D'], ['Group1 -> Group1H', 'Group1 -> D'], null],
+      [['B -> D'], ['Group1 -> Group1H', 'Group1 -> D'], ['Group1 -> Group1H', 'Group1 -> D']],
+      // // [event2, event1, event1]
+      [['B -> C', 'C -> D'], null, null],
+      [['B -> C', 'C -> D'], null, null],
+      [['B -> C', 'C -> D'], null, ['Group1 -> Group1H', 'Group1 -> D']],
+      // // [event2, event2, event1]
+      [['B -> C', 'C -> D'], null, null],
+      [['B -> C', 'C -> D'], null, null],
+      [['B -> C', 'C -> D'], null, ['Group1 -> Group1H', 'Group1 -> D']],
+      // // [event2, event3, event1]
+      [['B -> C', 'C -> D'], ['Group1 -> Group1H', 'Group1 -> D'], null],
+      [['B -> C', 'C -> D'], ['Group1 -> Group1H', 'Group1 -> D'], null],
+      [['B -> C', 'C -> D'], ['Group1 -> Group1H', 'Group1 -> D'], ['Group1 -> Group1H', 'Group1 -> D']],
+      // // [event3, event1, event1]
+      [['Group1 -> Group1H'], ['B -> D'], ['D -> D']],
+      [['Group1 -> Group1H'], ['B -> D'], null],
+      [['Group1 -> Group1H'], ['B -> D'], ['Group1 -> Group1H', 'Group1 -> D']],
+      // // [event3, event2, event1]
+      [['Group1 -> Group1H'], ['B -> C', 'C -> D'], null],
+      [['Group1 -> Group1H'], ['B -> C', 'C -> D'], null],
+      [['Group1 -> Group1H'], ['B -> C', 'C -> D'], ['Group1 -> Group1H', 'Group1 -> D']],
+      // // [event3, event3, event1]
+      [['Group1 -> Group1H'], ['Group1 -> Group1H'], ['B -> D']],
+      [['Group1 -> Group1H'], ['Group1 -> Group1H'], ['B -> C', 'C -> D']],
+      [['Group1 -> Group1H'], ['Group1 -> Group1H'], ['Group1 -> Group1H']],
+    ];
+
+    it('runs the machine as per the graph', function () {
+      assert.deepEqual(errors, [], `graphml string is correctly parsed`);
+      assert.deepEqual(events, ['event3', 'event2', 'event1'], `The list of events is correctly parsed`);
+      assert.deepEqual(
+        states,
+        {
+          Eღn1: '',
+          'Group 1ღn2': {
+            'Bღn2::n0': '',
+            'Cღn2::n1': '',
+            'Group 1ღn2::n2': {
+              'Dღn2::n2::n0': '',
+              'Dღn2::n2::n2': '',
+            },
+          },
+        },
+        `The hierarchy of states is correctly parsed`
+      );
+      assert.deepEqual(outputs1, expected1, `Branch machine initialized with number ok`);
+    });
+  });
+});
+
+describe('Conversion yed to kingly - testing conversion syntax: simple syntax with no compound actions or guards', function () {
+  const {getKinglyTransitions, stateYed2KinglyMap, states, events} = computeTransitionsAndStatesFromXmlString(test_yed_conversion_no_compound_actions_guards);
 
   describe('stateYed2KinglyMap', function () {
     it('Internal labels given to nodes as per XML file are correctly mapped to user-given names of nodes/control states', function () {
@@ -505,18 +1133,18 @@ describe('Conversion yed to kingly', function () {
   describe('states', function () {
     it(`The state hierarchy of the yed graph is correctly converted to a Kingly states configuration property`, function () {
       assert.deepEqual(states, {
-        "n2ღupdating": "",
-        "n1ღGroup 1": {
-          "n1::n0ღShowing mini UI": "",
-          "n1::n3ღbig UI collapsed": {
-            "n1::n3::n0ღIf": "",
-            "n1::n3::n2ღthen else": "",
+        "updatingღn2": "",
+        "Group 1ღn1": {
+          "Showing mini UIღn1::n0": "",
+          "big UI collapsedღn1::n3": {
+            "Ifღn1::n3::n0": "",
+            "then elseღn1::n3::n2": "",
           },
-          "n1::n4ღdummy": "",
+          "dummyღn1::n4": "",
         },
-        "n3ღGroup 3": {
-          "n3::n0ღran kan kan": "",
-          "n3::n2ღpa dam dam": "",
+        "Group 3ღn3": {
+          "ran kan kanღn3::n0": "",
+          "pa dam damღn3::n2": "",
         },
       });
     });
@@ -678,4 +1306,558 @@ describe('Conversion yed to kingly', function () {
   //   });
   // });
 
+});
+
+describe('Conversion yed to kingly - testing conversion syntax - compound guards and compound actions', function () {
+  // cf counter-inc-dec.graphml in tests/graphs
+  describe('counter-inc-dec - guards pass', function () {
+    // Should be exactly the same as the hierarchy_history_H case
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(counter_inc_dec);
+
+    // Build the machine
+    const guards = {
+      "is it": (s, e, stg) => true,
+      "is it not": (s, e, stg) => true,
+    };
+    const actionFactories = {
+      "increment counter": (s, e, stg) => ({updates: [+1], outputs: [s + 1]}),
+      "decrement counter": (s, e, stg) => ({updates: [-1], outputs: [s - 1]}),
+      "render": (s, e, stg) => ({updates: [], outputs: [`rendered`]}),
+      "render some more": (s, e, stg) => ({updates: [], outputs: []}),
+    };
+
+    const event1 = {"click inc": void 0};
+    const event2 = {"click dec": void 0};
+    const eventSpace = [event1, event2, {dummy: 0}];
+
+    const fsmDef1 = {
+      updateState: (s, u) => {
+        return u.reduce((a, b) => a + b, s)
+      },
+      initialExtendedState: 0,
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+
+    const inputSpace = cartesian([0, 1, 2], [0, 1, 2], [0, 1, 2]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]], eventSpace[scenario[2]]];
+    });
+    const expected1 = [
+      // [event1, event1, event1]
+      [[1, "rendered"], [2, "rendered"], [3, "rendered"]],
+      [[1, "rendered"], [2, "rendered"], [1, "rendered"]],
+      [[1, "rendered"], [2, "rendered"], null],
+      // [event1, event2, event1]
+      [[1, "rendered"], [0, "rendered"], [1, "rendered"]],
+      [[1, "rendered"], [0, "rendered"], [-1, "rendered"]],
+      [[1, "rendered"], [0, "rendered"], null],
+      // // [event1, event3, event1]
+      [[1, "rendered"], null, [2, "rendered"]],
+      [[1, "rendered"], null, [0, "rendered"]],
+      [[1, "rendered"], null, null],
+      // // [event2, event1, event1]
+      [[-1, "rendered"], [0, "rendered"], [1, "rendered"]],
+      [[-1, "rendered"], [0, "rendered"], [-1, "rendered"]],
+      [[-1, "rendered"], [0, "rendered"], null],
+      // // [event2, event2, event1]
+      [[-1, "rendered"], [-2, "rendered"], [-1, "rendered"]],
+      [[-1, "rendered"], [-2, "rendered"], [-3, "rendered"]],
+      [[-1, "rendered"], [-2, "rendered"], null],
+      // // [event2, event3, event1]
+      [[-1, "rendered"], null, [0, "rendered"]],
+      [[-1, "rendered"], null, [-2, "rendered"]],
+      [[-1, "rendered"], null, null],
+      // // [event3, event1, event1]
+      [null, [1, "rendered"], [2, "rendered"]],
+      [null, [1, "rendered"], [0, "rendered"]],
+      [null, [1, "rendered"], null],
+      // // [event3, event2, event1]
+      [null, [-1, "rendered"], [0, "rendered"]],
+      [null, [-1, "rendered"], [-2, "rendered"]],
+      [null, [-1, "rendered"], null],
+      // // [event3, event3, event1]
+      [null, null, [1, "rendered"]],
+      [null, null, [-1, "rendered"]],
+      [null, null, null],
+    ];
+
+    // it('runs the machine as per the graph', function() {
+    //   cases.forEach((scenario, index) => {
+    //     // Allows to pick some specific index for easier debugging
+    //     // if (index > 20) return
+    //     const fsm = createStateMachine(fsmDef1, settings);
+    //     const outputs = scenario.map(fsm);
+    //     assert.deepEqual(outputs, expected1[index], prettyFormat(scenario));
+    //   });
+    // });
+
+
+  });
+
+  describe('counter-inc-dec - first guard fail', function () {
+    // Should be exactly the same as the hierarchy_history_H case
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(counter_inc_dec);
+    // Build the machine
+    const guards = {
+      "is it": (s, e, stg) => false,
+      "is it not": (s, e, stg) => true,
+    };
+    const actionFactories = {
+      "increment counter": (s, e, stg) => ({updates: [+1], outputs: [s + 1]}),
+      "decrement counter": (s, e, stg) => ({updates: [-1], outputs: [s - 1]}),
+      "render": (s, e, stg) => ({updates: [], outputs: [`rendered`]}),
+      "render some more": (s, e, stg) => ({updates: [], outputs: []}),
+    };
+
+    const event1 = {"click inc": void 0};
+    const event2 = {"click dec": void 0};
+    const eventSpace = [event1, event2, {dummy: 0}];
+
+    const fsmDef1 = {
+      updateState: (s, u) => {
+        return u.reduce((a, b) => a + b, s)
+      },
+      initialExtendedState: 0,
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+
+    const inputSpace = cartesian([0, 1, 2], [0, 1, 2], [0, 1, 2]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]], eventSpace[scenario[2]]];
+    });
+    const expected1 = [
+      // [event1, event1, event1]
+      [[null], [null], [null]],
+      [[null], [null], [-1, "rendered"]],
+      [[null], [null], null],
+      // [event1, event2, event1]
+      [[null], [-1, "rendered"], [null]],
+      [[null], [-1, "rendered"], [-2, "rendered"]],
+      [[null], [-1, "rendered"], null],
+      // // [event1, event3, event1]
+      [[null], null, [null]],
+      [[null], null, [-1, "rendered"]],
+      [[null], null, null],
+      // // [event2, event1, event1]
+      [[-1, "rendered"], [null], [null]],
+      [[-1, "rendered"], [null], [-2, "rendered"]],
+      [[-1, "rendered"], [null], null],
+      // // [event2, event2, event1]
+      [[-1, "rendered"], [-2, "rendered"], [null]],
+      [[-1, "rendered"], [-2, "rendered"], [-3, "rendered"]],
+      [[-1, "rendered"], [-2, "rendered"], null],
+      // // [event2, event3, event1]
+      [[-1, "rendered"], null, [null]],
+      [[-1, "rendered"], null, [-2, "rendered"]],
+      [[-1, "rendered"], null, null],
+      // // [event3, event1, event1]
+      [null, [null], [null]],
+      [null, [null], [-1, "rendered"]],
+      [null, [null], null],
+      // // [event3, event2, event1]
+      [null, [-1, "rendered"], [null]],
+      [null, [-1, "rendered"], [-2, "rendered"]],
+      [null, [-1, "rendered"], null],
+      // // [event3, event3, event1]
+      [null, null, [null]],
+      [null, null, [-1, "rendered"]],
+      [null, null, null],
+    ];
+
+    it('runs the machine as per the graph', function () {
+      cases.forEach((scenario, index) => {
+        // Allows to pick some specific index for easier debugging
+        // if (index > 20) return
+        const fsm = createStateMachine(fsmDef1, {});
+        const outputs = scenario.map(fsm);
+        assert.deepEqual(outputs, expected1[index], prettyFormat(scenario));
+      });
+    });
+
+
+  });
+
+  describe('counter-inc-dec - second guard fail', function () {
+    const {getKinglyTransitions, stateYed2KinglyMap, states, events} = computeTransitionsAndStatesFromXmlString(counter_inc_dec);
+
+    // Build the machine
+    const guards = {
+      "is it": function isIt(s, e, stg) {
+        return true
+      },
+      "is it not": function isItNot(s, e, stg) {
+        return false
+      },
+    };
+    const actionFactories = {
+      "increment counter": (s, e, stg) => ({updates: [+1], outputs: [s + 1]}),
+      "decrement counter": (s, e, stg) => ({updates: [-1], outputs: [s - 1]}),
+      "render": (s, e, stg) => ({updates: [], outputs: [`rendered`]}),
+      "render some more": (s, e, stg) => ({updates: [], outputs: []}),
+    };
+
+    const event1 = {"click inc": void 0};
+    const event2 = {"click dec": void 0};
+    const eventSpace = [event1, event2, {dummy: 0}];
+    const fsmDef1 = {
+      updateState: (s, u) => {
+        return u.reduce((a, b) => a + b, s)
+      },
+      initialExtendedState: 0,
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+
+    const inputSpace = cartesian([0, 1, 2], [0, 1, 2], [0, 1, 2]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]], eventSpace[scenario[2]]];
+    });
+    const expected1 = [
+      // [event1, event1, event1]
+      [[null], [null], [null]],
+      [[null], [null], [-1, "rendered"]],
+      [[null], [null], null],
+      // [event1, event2, event1]
+      [[null], [-1, "rendered"], [null]],
+      [[null], [-1, "rendered"], [-2, "rendered"]],
+      [[null], [-1, "rendered"], null],
+      // // [event1, event3, event1]
+      [[null], null, [null]],
+      [[null], null, [-1, "rendered"]],
+      [[null], null, null],
+      // // [event2, event1, event1]
+      [[-1, "rendered"], [null], [null]],
+      [[-1, "rendered"], [null], [-2, "rendered"]],
+      [[-1, "rendered"], [null], null],
+      // // [event2, event2, event1]
+      [[-1, "rendered"], [-2, "rendered"], [null]],
+      [[-1, "rendered"], [-2, "rendered"], [-3, "rendered"]],
+      [[-1, "rendered"], [-2, "rendered"], null],
+      // // [event2, event3, event1]
+      [[-1, "rendered"], null, [null]],
+      [[-1, "rendered"], null, [-2, "rendered"]],
+      [[-1, "rendered"], null, null],
+      // // [event3, event1, event1]
+      [null, [null], [null]],
+      [null, [null], [-1, "rendered"]],
+      [null, [null], null],
+      // // [event3, event2, event1]
+      [null, [-1, "rendered"], [null]],
+      [null, [-1, "rendered"], [-2, "rendered"]],
+      [null, [-1, "rendered"], null],
+      // // [event3, event3, event1]
+      [null, null, [null]],
+      [null, null, [-1, "rendered"]],
+      [null, null, null],
+    ];
+
+    it('runs the machine as per the graph', function () {
+      cases.forEach((scenario, index) => {
+        // Allows to pick some specific index for easier debugging
+        // if (index > 20) return
+        const fsm = createStateMachine(fsmDef1, {});
+        const outputs = scenario.map(fsm);
+        assert.deepEqual(outputs, expected1[index], prettyFormat(scenario));
+      });
+    });
+  })
+});
+
+describe('Conversion yed to kingly - testing conversion syntax - several transitions per edge', function() {
+  const {
+    counter,
+  } = graphs;
+  const settings = {};
+  // const settings = {debug: {fakeConsole}};
+
+  describe('counter-inc-dec - guards pass', function() {
+    // Should be exactly the same as the hierarchy_history_H case
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(counter);
+
+    // Build the machine
+    const guards = {
+      "is it": (s, e, stg) => true,
+      "is it not": (s, e, stg) => true,
+    };
+    const actionFactories = {
+      "increment counter": (s, e, stg) => ({updates: [+1], outputs:[s+1]}),
+      "decrement counter": (s, e, stg) => ({updates: [-1], outputs:[s-1]}),
+      "render": (s, e, stg) => ({updates: [], outputs:[`rendered`]}),
+      "render some more": (s, e, stg) => ({updates: [], outputs:[]}),
+    };
+
+    const event1 = {"click inc": void 0};
+    const event2 = {"click dec": void 0};
+    const eventSpace = [event1, event2, {dummy:0}];
+
+    const fsmDef1 = {
+      updateState: (s, u) => {
+        return u.reduce((a,b) => a+b, s)
+      },
+      initialExtendedState: 0,
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+
+    const inputSpace = cartesian([0, 1, 2], [0, 1, 2], [0, 1, 2]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]], eventSpace[scenario[2]]];
+    });
+    const expected1 = [
+      // [event1, event1, event1]
+      [[1, "rendered"], [2, "rendered"], [3, "rendered"]],
+      [[1, "rendered"], [2, "rendered"], [1, "rendered"]],
+      [[1, "rendered"], [2, "rendered"], null],
+      // [event1, event2, event1]
+      [[1, "rendered"], [0, "rendered"], [1, "rendered"]],
+      [[1, "rendered"], [0, "rendered"], [-1, "rendered"]],
+      [[1, "rendered"], [0, "rendered"], null],
+      // // [event1, event3, event1]
+      [[1, "rendered"], null, [2, "rendered"]],
+      [[1, "rendered"], null, [0, "rendered"]],
+      [[1, "rendered"], null, null],
+      // // [event2, event1, event1]
+      [[-1, "rendered"], [0, "rendered"], [1, "rendered"]],
+      [[-1, "rendered"], [0, "rendered"], [-1, "rendered"]],
+      [[-1, "rendered"], [0, "rendered"], null],
+      // // [event2, event2, event1]
+      [[-1, "rendered"], [-2, "rendered"], [-1, "rendered"]],
+      [[-1, "rendered"], [-2, "rendered"], [-3, "rendered"]],
+      [[-1, "rendered"], [-2, "rendered"], null],
+      // // [event2, event3, event1]
+      [[-1, "rendered"], null, [0, "rendered"]],
+      [[-1, "rendered"], null, [-2, "rendered"]],
+      [[-1, "rendered"], null, null],
+      // // [event3, event1, event1]
+      [null, [1, "rendered"], [2, "rendered"]],
+      [null, [1, "rendered"], [0, "rendered"]],
+      [null, [1, "rendered"], null],
+      // // [event3, event2, event1]
+      [null, [-1, "rendered"], [0, "rendered"]],
+      [null, [-1, "rendered"], [-2, "rendered"]],
+      [null, [-1, "rendered"], null],
+      // // [event3, event3, event1]
+      [null, null, [1, "rendered"]],
+      [null, null, [-1, "rendered"]],
+      [null, null, null],
+    ];
+
+    // it('runs the machine as per the graph', function() {
+    //   cases.forEach((scenario, index) => {
+    //     // Allows to pick some specific index for easier debugging
+    //     // if (index > 20) return
+    //     const fsm = createStateMachine(fsmDef1, settings);
+    //     const outputs = scenario.map(fsm);
+    //     assert.deepEqual(outputs, expected1[index], prettyFormat(scenario));
+    //   });
+    // });
+
+
+  });
+
+  describe('counter-inc-dec - first guard fail', function() {
+    // Should be exactly the same as the hierarchy_history_H case
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(counter);
+    // Build the machine
+    const guards = {
+      "is it": (s, e, stg) => false,
+      "is it not": (s, e, stg) => true,
+    };
+    const actionFactories = {
+      "increment counter": (s, e, stg) => ({updates: [+1], outputs:[s+1]}),
+      "decrement counter": (s, e, stg) => ({updates: [-1], outputs:[s-1]}),
+      "render": (s, e, stg) => ({updates: [], outputs:[`rendered`]}),
+      "render some more": (s, e, stg) => ({updates: [], outputs:[]}),
+    };
+
+    const event1 = {"click inc": void 0};
+    const event2 = {"click dec": void 0};
+    const eventSpace = [event1, event2, {dummy:0}];
+
+    const fsmDef1 = {
+      updateState: (s, u) => {
+        return u.reduce((a,b) => a+b, s)
+      },
+      initialExtendedState: 0,
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+
+    const inputSpace = cartesian([0, 1, 2], [0, 1, 2], [0, 1, 2]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]], eventSpace[scenario[2]]];
+    });
+    const expected1 = [
+      // [event1, event1, event1]
+      [[null], [null], [null]],
+      [[null], [null], [-1, "rendered"]],
+      [[null], [null], null],
+      // [event1, event2, event1]
+      [[null], [-1, "rendered"], [null]],
+      [[null], [-1, "rendered"], [-2, "rendered"]],
+      [[null], [-1, "rendered"], null],
+      // // [event1, event3, event1]
+      [[null], null, [null]],
+      [[null], null, [-1, "rendered"]],
+      [[null], null, null],
+      // // [event2, event1, event1]
+      [[-1, "rendered"], [null], [null]],
+      [[-1, "rendered"], [null], [-2, "rendered"]],
+      [[-1, "rendered"], [null], null],
+      // // [event2, event2, event1]
+      [[-1, "rendered"], [-2, "rendered"], [null]],
+      [[-1, "rendered"], [-2, "rendered"], [-3, "rendered"]],
+      [[-1, "rendered"], [-2, "rendered"], null],
+      // // [event2, event3, event1]
+      [[-1, "rendered"], null, [null]],
+      [[-1, "rendered"], null, [-2, "rendered"]],
+      [[-1, "rendered"], null, null],
+      // // [event3, event1, event1]
+      [null, [null], [null]],
+      [null, [null], [-1, "rendered"]],
+      [null, [null], null],
+      // // [event3, event2, event1]
+      [null, [-1, "rendered"], [null]],
+      [null, [-1, "rendered"], [-2, "rendered"]],
+      [null, [-1, "rendered"], null],
+      // // [event3, event3, event1]
+      [null, null, [null]],
+      [null, null, [-1, "rendered"]],
+      [null, null, null],
+    ];
+
+    it('runs the machine as per the graph', function() {
+      cases.forEach((scenario, index) => {
+        // Allows to pick some specific index for easier debugging
+        // if (index > 20) return
+        const fsm = createStateMachine(fsmDef1, settings);
+        const outputs = scenario.map(fsm);
+        assert.deepEqual(outputs, expected1[index], prettyFormat(scenario));
+      });
+    });
+
+
+  });
+
+  describe('counter-inc-dec - second guard fail', function() {
+    // Should be exactly the same as the hierarchy_history_H case
+    const {
+      getKinglyTransitions,
+      stateYed2KinglyMap,
+      states,
+      events,
+      errors,
+    } = computeTransitionsAndStatesFromXmlString(counter);
+    // Build the machine
+    const guards = {
+      "is it": (s, e, stg) => true,
+      "is it not": (s, e, stg) => false,
+    };
+    const actionFactories = {
+      "increment counter": (s, e, stg) => ({updates: [+1], outputs:[s+1]}),
+      "decrement counter": (s, e, stg) => ({updates: [-1], outputs:[s-1]}),
+      "render": (s, e, stg) => ({updates: [], outputs:[`rendered`]}),
+      "render some more": (s, e, stg) => ({updates: [], outputs:[]}),
+    };
+
+    const event1 = {"click inc": void 0};
+    const event2 = {"click dec": void 0};
+    const eventSpace = [event1, event2, {dummy:0}];
+
+    const fsmDef1 = {
+      updateState: (s, u) => {
+        return u.reduce((a,b) => a+b, s)
+      },
+      initialExtendedState: 0,
+      events,
+      states,
+      transitions: getKinglyTransitions({actionFactories, guards}).transitions,
+    };
+
+    const inputSpace = cartesian([0, 1, 2], [0, 1, 2], [0, 1, 2]);
+    const cases = inputSpace.map(scenario => {
+      return [eventSpace[scenario[0]], eventSpace[scenario[1]], eventSpace[scenario[2]]];
+    });
+    const expected1 = [
+      // [event1, event1, event1]
+      [[null], [null], [null]],
+      [[null], [null], [-1, "rendered"]],
+      [[null], [null], null],
+      // [event1, event2, event1]
+      [[null], [-1, "rendered"], [null]],
+      [[null], [-1, "rendered"], [-2, "rendered"]],
+      [[null], [-1, "rendered"], null],
+      // // [event1, event3, event1]
+      [[null], null, [null]],
+      [[null], null, [-1, "rendered"]],
+      [[null], null, null],
+      // // [event2, event1, event1]
+      [[-1, "rendered"], [null], [null]],
+      [[-1, "rendered"], [null], [-2, "rendered"]],
+      [[-1, "rendered"], [null], null],
+      // // [event2, event2, event1]
+      [[-1, "rendered"], [-2, "rendered"], [null]],
+      [[-1, "rendered"], [-2, "rendered"], [-3, "rendered"]],
+      [[-1, "rendered"], [-2, "rendered"], null],
+      // // [event2, event3, event1]
+      [[-1, "rendered"], null, [null]],
+      [[-1, "rendered"], null, [-2, "rendered"]],
+      [[-1, "rendered"], null, null],
+      // // [event3, event1, event1]
+      [null, [null], [null]],
+      [null, [null], [-1, "rendered"]],
+      [null, [null], null],
+      // // [event3, event2, event1]
+      [null, [-1, "rendered"], [null]],
+      [null, [-1, "rendered"], [-2, "rendered"]],
+      [null, [-1, "rendered"], null],
+      // // [event3, event3, event1]
+      [null, null, [null]],
+      [null, null, [-1, "rendered"]],
+      [null, null, null],
+    ];
+
+    it('runs the machine as per the graph', function() {
+      cases.forEach((scenario, index) => {
+        // Allows to pick some specific index for easier debugging
+        // if (index > 20) return
+        const fsm = createStateMachine(fsmDef1, settings);
+        const outputs = scenario.map(fsm);
+        assert.deepEqual(outputs, expected1[index], prettyFormat(scenario));
+      });
+    });
+
+
+  });
 });

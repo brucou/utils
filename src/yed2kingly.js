@@ -69,7 +69,7 @@ const getLabel = (graphObj) => {
 const getChildren = graphObj => (graphObj.graph ? graphObj.graph.node : []);
 const constructStateHierarchy = (label, children) => {
   const [yedLabel, stateLabel] = label;
-  const _label = label.join(SEP);
+  const _label = [stateLabel, yedLabel].join(SEP);
   const isAtomicState = children => children && children.length === 0;
   const isHistoryState = stateLabel => (stateLabel === "H" || stateLabel === "H*");
 
@@ -284,7 +284,7 @@ function computeKinglyTransitionsFactory(stateYed2KinglyMap, edges, injected) {
           //   Case: non-top-level, i.e. compound state's init transition
           // -> there is a parent to the origin node, that's the compound node we want
           const fromParent = getYedParentNode(yedFrom);
-          from = [fromParent, stateYed2KinglyMap[fromParent]].join(SEP);
+          from = [stateYed2KinglyMap[fromParent], fromParent].join(SEP);
           event = INIT_EVENT;
         }
       }
@@ -343,7 +343,7 @@ function computeTransitionsAndStatesFromXmlString(yedString) {
   const stateHierarchy = mapOverTree(stateHierarchyLens, x => x, graphObj)[SEP];
   const stateYed2KinglyMap = mapOverTree(stateYed2KinglyLens, x => x, graphObj);
   const yedEdges = graphObj.graph.edge;
-  console.warn(`stateHierarchy `, stateHierarchy )
+  // console.warn(`stateHierarchy `, stateHierarchy )
 
   // Kingly only admits one transition record per (from, event) couple
   // Additionally, when there is no guard to check, a simplified transition format can be used

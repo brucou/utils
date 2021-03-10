@@ -1,7 +1,7 @@
 const parser = require('fast-xml-parser');
-const { YED_DEEP_HISTORY_STATE, YED_SHALLOW_HISTORY_STATE, YED_ENTRY_STATE, SEP, DEFAULT_ACTION_FACTORY_STR, DEFAULT_ACTION_FACTORY } = require('./properties');
-const { historyState, SHALLOW, DEEP, fsmContracts, createStateMachine } = require('kingly');
-const { mapOverObj } = require('fp-rosetree');
+const {YED_DEEP_HISTORY_STATE, YED_SHALLOW_HISTORY_STATE, YED_ENTRY_STATE, SEP, DEFAULT_ACTION_FACTORY_STR, DEFAULT_ACTION_FACTORY} = require('./properties');
+const {historyState, SHALLOW, DEEP, fsmContracts, createStateMachine} = require('kingly');
+const {mapOverObj} = require('fp-rosetree');
 
 function T() {
   return true;
@@ -26,7 +26,7 @@ class Yed2KinglyConversionError extends Error {
   constructor(m) {
     super(m);
     this.errors = m;
-    this.message = m.map(({ when, location, info, message }) => {
+    this.message = m.map(({when, location, info, message}) => {
       // formatted message
       const fm = `At ${location}: ${when} => ${message}`;
       console.info(fm, info);
@@ -40,7 +40,7 @@ function handleAggregateEdgesPerFromEventKeyErrors(e, errors, [hashMap, yedEdge]
   errors.push({
     when: `building (from, event) hashmap`,
     location: `computeTransitionsAndStatesFromXmlString > aggregateEdgesPerFromEventKey`,
-    info: { hashMap: JSON.parse(JSON.stringify(hashMap)), yedEdge },
+    info: {hashMap: JSON.parse(JSON.stringify(hashMap)), yedEdge},
     message: e.message,
     possibleCauses: [
       `File is not a valid yed-generated graphML file`,
@@ -58,7 +58,7 @@ function handleParseGraphMlStringErrors(e, errors, [yedString]) {
   errors.push({
       when: `parsing the graphml string`,
       location: `computeTransitionsAndStatesFromXmlString > parser.parse`,
-      info: { yedString },
+      info: {yedString},
       possibleCauses: [
         `File is not an XML file`,
         `File is not a graphML file`,
@@ -106,8 +106,12 @@ function isDeepHistoryDestinationState(stateYed2KinglyMap, yedTo) {
 
 // Conversion helpers
 // iff no predicate, and only one transition in array
+function isEmptyArray(arr) {
+  return Array.isArray(arr) && arr.length === 0
+}
+
 function isSimplifiableSyntax(arrGuardsTargetActions) {
-  return arrGuardsTargetActions.length === 1 && !arrGuardsTargetActions[0].predicate;
+  return arrGuardsTargetActions.length === 1 && isEmptyArray(arrGuardsTargetActions[0].predicate);
 }
 
 function getYedParentNode(yedFrom) {
@@ -130,14 +134,72 @@ function computeKinglyDestinationState(stateYed2KinglyMap, yedTo) {
   }
 }
 
-function mapActionFactoryStrToActionFactoryFn(actionFactories, actionFactoryStr) {
-  return actionFactoryStr === DEFAULT_ACTION_FACTORY_STR
-    ? DEFAULT_ACTION_FACTORY
-    : actionFactories[actionFactoryStr];
+function aggregateActions(actionArr) {
+  // Trick to have the generated function have its name dynamically constructed
+  // so it appears in debugging sessions
+  const obj = {
+    [actionArr.map(action => action.name).join(' & ')]: function (...args) {
+      // Every action in actionArr will compute outputs and state updates
+      // which we will have to sum
+      return actionArr
+        .map(actionFn => actionFn(...args))
+        .reduce((acc, {outputs, updates}) => {
+          acc.outputs = acc.outputs.concat(outputs);
+          acc.updates = acc.updates.concat(updates);
+          return acc
+        }, {outputs: [], updates: []})
+    }
+  };
+
+  return obj[Object.keys(obj)[0]]
 }
 
-function mapGuardStrToGuardFn(guards, predicateStr) {
-  return guards[predicateStr] || T;
+/**
+ * Take a hash of action factories indexed by the action factories name, a list of names, and makes a single action factory.
+ * Example: [ 'increment counter', 'render' ] => add the outputs of both corresponding action factories as taken from the hash
+ * @param actionFactories {Object.<String, ActionFactory>}
+ * @param actionFactoryStrArr {Array<String>}
+ */
+function mapActionFactoryStrToActionFactoryFn(actionFactories, actionFactoryStrArr) {
+  if (Array.isArray(actionFactoryStrArr)) {
+    if (actionFactoryStrArr.length === 0) return DEFAULT_ACTION_FACTORY
+    else if (actionFactoryStrArr.length === 1) return actionFactories[actionFactoryStrArr[0]];
+    else {
+      const actionFactoriesFn = actionFactoryStrArr.map(x => actionFactories[x]);
+      return aggregateActions(actionFactoriesFn);
+    }
+  }
+  const actionArr = actionFactoryStrArr.map(x => actionFactories[x]);
+
+  return actionFactoryStrArr === DEFAULT_ACTION_FACTORY_STR
+    ? DEFAULT_ACTION_FACTORY
+    : aggregateActions(actionArr);
+}
+
+function aggregateGuards(guardsArr) {
+  return function aggregatedGuards(...args) {
+    return guardsArr.every(guard => guard(...args))
+  }
+}
+
+/**
+ * Take a hash of guards indexed by the guard name, a list of names, and makes a single guard from it.
+ * Example: [ 'predicate1', 'predicate2' ] => add the outputs of both corresponding guards as taken from the hash
+ * @param guards {Object.<String, FSM_Predicate>}
+ * @param predicateStrArr {Array<String>}
+ */
+function mapGuardStrToGuardFn(guards, predicateStrArr) {
+  if (Array.isArray(predicateStrArr)) {
+    if (predicateStrArr.length === 0) return T
+    else if (predicateStrArr.length === 1) return guards[predicateStrArr[0]]
+    else {
+      const predicatesFn = predicateStrArr.map(guardStr => guards[guardStr]);
+
+      return aggregateGuards(predicatesFn)
+    }
+  }
+  else return guards[predicateStrArr] || T;
+
 }
 
 function markArrayFunctionStr(_, arr) {
@@ -145,7 +207,7 @@ function markArrayFunctionStr(_, arr) {
 }
 
 function markFunctionNoop(_, str) {
-  return () => ({ outputs: [], updates: [] });
+  return () => ({outputs: [], updates: []});
 }
 
 function markGuardNoop(_, str) {
@@ -169,7 +231,7 @@ function parseGraphMlString(yedString) {
   //       line: lineNumber,
   //   },
   // };
-  const jsonObj = parser.parse(yedString, { ignoreAttributes: false }, true);
+  const jsonObj = parser.parse(yedString, {ignoreAttributes: false}, true);
   if (!jsonObj.graphml) throw `Not a graphml file? Could not find a <graphml> tag!`;
 
   return jsonObj;
@@ -218,6 +280,8 @@ const fakeConsole = {
   },
   debug: () => {
   },
+  group: () => {},
+  groupEnd: () => {},
 };
 
 function checkKinglyContracts(states, events, transitions) {
@@ -229,7 +293,7 @@ function checkKinglyContracts(states, events, transitions) {
       transitions,
       updateState: () => {
       },
-    }, { debug: { console: fakeConsole, checkContracts: fsmContracts } });
+    }, {debug: {console: fakeConsole, checkContracts: fsmContracts}});
   }
   catch (err) {
     console.error(err);
@@ -273,7 +337,7 @@ function trimInside(str) {
 }
 
 function computeParentMapFromHistoryMaps(historyMaps, stateIndexList, stateListWithNok) {
-  const { stateList, stateAncestors } = historyMaps;
+  const {stateList, stateAncestors} = historyMaps;
   // Example of stateAncestors
   // var stateAncestors = {
   //   "n2::n0ღHome route": ["n2ღApplication core"],
@@ -288,7 +352,7 @@ function computeParentMapFromHistoryMaps(historyMaps, stateIndexList, stateListW
   const parentMap = stateListWithNok.map(cs => {
     return stateIndexList[stateAncestors[cs] && stateAncestors[cs][0] || -1]
   })
-    // css.map(cs => stateIndexList[stateAncestors[cs][0]]);
+  // css.map(cs => stateIndexList[stateAncestors[cs][0]]);
   return parentMap;
 };
 
@@ -299,12 +363,12 @@ function getCommentsHeader(transitionsWithoutGuardsActions, stateListWithNok) {
   let actionList = new Set();
   // Used to compute predicateList and actionList
   transitionsWithoutGuardsActions.map(transitionRecord => {
-    const { from, event, guards } = transitionRecord;
+    const {from, event, guards} = transitionRecord;
     // console.warn(`getCommentsHeader > transitionRecord > guards`, guards);
     return `
            { from: "${from}", event: "${event}", guards: [
            ${guards.map(guardRecord => {
-      const { predicate, to, action } = guardRecord;
+      const {predicate, to, action} = guardRecord;
       const predicates = predicate.map(x => x.slice(3, -3)).filter(Boolean);
       const actions = action.map(x => x.slice(3, -3)).filter(Boolean);
       predicates.forEach(x => predicateList.add(x));
@@ -360,15 +424,15 @@ const frontHeader = `
 // http://github.com/brucou/Kingly
 `.trim();
 
-function isTransitionWithoutGuard(guards){
+function isTransitionWithoutGuard(guards) {
   return guards.length === 1 && guards[0].predicate.length === 0
 }
 
-function getIndexedHistoryStates(initialHistoryStateKingly, stateListWithNok){
-  return Object.keys(initialHistoryStateKingly).reduce( (acc, historyType) => {
+function getIndexedHistoryStates(initialHistoryStateKingly, stateListWithNok) {
+  return Object.keys(initialHistoryStateKingly).reduce((acc, historyType) => {
     acc[historyType] = stateListWithNok.map(cs => -1)
     return acc
-  },{})
+  }, {})
 }
 
 

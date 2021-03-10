@@ -1,6 +1,6 @@
 {
-  "name": "utils",
-  "version": "0.1.0",
+  "name": "@brucou/utilities",
+  "version": "0.2.0",
   "author": "brucou",
   "description": "Supporting utilities for the Kingly state machine library",
   "scripts": {
@@ -17,7 +17,7 @@
     "fp-rosetree": "0.6.2",
     "fs": "latest",
     "funfix": "^7.0.1",
-    "kingly": "^0.28.0",
+    "kingly": "^0.28.8",
     "nearley": "^2.19.3",
     "prettier": "^2.0.4",
     "pretty-format": "^26.0.0",
@@ -32,12 +32,8 @@
   },
   "sideEffects": false,
   "files": [
-    "index.js",
-    "conversion.js",
-    "helpers.js",
-    "properties.js",
-    "templates.js",
-    "yedEdgeLabelGrammar.js"
+    "src/**",
+    "tests/**"
   ],
   "license": "MIT",
   "keywords": [
@@ -50,16 +46,16 @@
     "automaton",
     "automata"
   ],
-  "main": "index.js",
+  "main": "src/index.js",
   "directories": {
     "test": "tests"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/state-machinery/utils.git"
+    "url": "git+https://github.com/kingly/utils.git"
   },
   "bugs": {
-    "url": "https://github.com/state-machinery/utils/issues"
+    "url": "https://github.com/kingly/utils/issues"
   },
-  "homepage": "https://github.com/state-machinery/utils#readme"
+  "homepage": "https://github.com/kingly/utils#readme"
 }
